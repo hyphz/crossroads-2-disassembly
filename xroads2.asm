@@ -10,13 +10,52 @@ explosion_status = $4028
 player_1_score_digits = $6040
 player_2_score_digits = $6048
 high_score_digits = $6050
-p1_shields = $4600
+entity_shields = $4600
 p2_shields = $4601
 p1_lives = $11
 p2_lives = $12
 level_tens = $b0
-level_units = $b1
+level_units_a = $b1
+level_units_b = $47
+level_units_c = $4b
+var_c = $4c
+var_d = $41
+var_e = $6c
+var_f_init_12 = $0d
+var_g_init_11 = $39
+level_x4_p70 = $d7
+
+p1_shields_copy = $14
+p2_shields_copy = $15
+
+var_a_init_zero = $c9
+var_b_init_zero = $6b
+
+
 jiffy_clock = $a2
+colors = $d800
+
+
+player_var_ua = $49
+player_var_ub = $4e
+
+
+entity_x_coords = $4e00
+entity_y_coords = $4f00
+
+
+
+
+
+; $4500 seems to show player any frame. 22 for standard, a2 for half
+; 26 if blocked
+
+; entity_x_coords PLAYER X COORDINATE 0 = left
+; entity_y_coords PLAYER Y COORDINATE 0 = top
+
+
+
+; $5100 - player facing. 0-3 down up left right
 
 
 screen = $0400
@@ -729,7 +768,7 @@ label_0b24
 label_0b30
    jsr clear_explosions
        ldx #$07
-       stx $0d
+       stx var_f_init_12
       stx $48
       stx $52
     sta $4060
@@ -742,7 +781,7 @@ label_0b3e
           tax
 
 label_0b48
-    sta p1_shields, x
+    sta entity_shields, x
     sta $5000, x
           inx
        bne label_0b48
@@ -750,10 +789,10 @@ label_0b48
        sta $af
        sta level_tens
           dex
-       stx $d7
+       stx level_x4_p70
        lda #$0a
-       sta $4b
-       sta level_units
+       sta level_units_c
+       sta level_units_a
        lda #<msg_banner
        ldy #>msg_banner
     jsr output_string_at_yyaa_until_zero_or_quote
@@ -822,12 +861,12 @@ label_0bbf
 label_0bcd
   lda port_2_joystick
   cmp #%01111111               ; Is joystick idle?
-  beq handle_player_1_joystick
+  beq handle_player_2_joystick
   and #%00010000               ; Is fire button down?
   beq label_0c2b
-  jsr label_0c1b
+  jsr toggle_2_player_indicator
 
-handle_player_1_joystick
+handle_player_2_joystick
   lda port_1_joystick
   cmp #$ff                     ; Joystick idle / timer bits??
   beq label_0bf2
@@ -839,7 +878,7 @@ handle_player_1_joystick
   bne label_0c2b
 
 label_0bef
-   jsr label_0c1b
+   jsr toggle_2_player_indicator
 
 label_0bf2
       lda #$08
@@ -870,89 +909,97 @@ label_0c15
    jsr label_152d
    jmp label_0bfa
 
-label_0c1b
-   lda $0426       ; Screen, letter L of Player 2 lives???
-   cmp #$20
-   beq label_0c25
-   lda #$20
-   !byte $2c       ; BIT $40A9 ??
-label_0c25
-   lda #$40        ; A9 40
-   sta $0426
+; --------------------------------------------------------------------   
+   
+!zone toggle_2_player_indicator
+
+toggle_2_player_indicator
+   lda screen+$26  ; Top left of screen 
+   cmp #$20        ; If it's a space..
+   beq .enable_2_player
+   lda #$20        ; Make it a space
+   !byte $2c       ; BIT NOP hack
+.enable_2_player
+   lda #$40        ; Make it a player icon (potentially NOPped)
+   sta screen+$26  ; Store back in top left of screen
    rts
+
+; --------------------------------------------------------------------   
+; LIKELY GAME SETUP ROUTINE   
 
 label_0c2b
    ldx #$00
    ldy #$04
    sty p1_lives
    jsr load_3_2_6_to_14_aa_be_with_x_offset
-   lda $0426        ; Letter L of player 2 lives??
-   cmp #$40
-   beq label_0c3d
-   ldy #$00
+   lda screen+$26   ; Are we in 2 player mode (second player icon in
+   cmp #$40         ; top left of screen?)
+   beq .start_2player
+   ldy #$00         ; IF not, give player 2 zero lives
 
-label_0c3d
-      sty p2_lives
-         inx
+.start_2player
+   sty p2_lives
+   inx
    jsr load_3_2_6_to_14_aa_be_with_x_offset
-   lda $0623
-         sec
-      sbc #$30
-      sta level_units
-      sta $47
-      sta $4b
-      lda #$9d
-      ldy #$1e
+   lda screen+$223  ; Digit of level to start at
+   sec
+   sbc #$30         ; Subtract PETSCII offset to get actual number
+   sta level_units_a
+   sta level_units_b
+   sta level_units_c
+   lda #$9d         ; Display top status line
+   ldy #$1e
    jsr output_string_at_yyaa_until_zero_or_quote
-      ldx #$27
+   ldx #$27
 
-label_0c58
-   lda $d800, x
-   sta $d828, x
-      lda #$20
-   sta $0428, x
-         dex
-      bpl label_0c58
+.setup_lower_status_line_loop
+   lda colors, x      ; Copy color info from top status line to bottom
+   sta colors+$28, x
+   lda #$20           ; Also blank bottom status line
+   sta screen+$28, x
+   dex
+   bpl .setup_lower_status_line_loop
+   
    jsr label_0ea7
    jsr update_status_bar
 
 label_0c6c
-      lda #$00
-         tax
+   lda #$00
+   tax
 
 label_0c6f
-   sta p1_shields, x
-         inx
-      bne label_0c6f
-      sta $c9
-      sta $6b
-      lda #$02
-      sta $4c
-      sta $41
-      sta $6c
-      lda $4b
-         asl
-         asl
-         clc
-      adc #$46
-      bcs label_0c8c
-      sta $d7
+   sta entity_shields, x
+   inx
+   bne label_0c6f
+   sta var_a_init_zero
+   sta var_b_init_zero
+   lda #$02
+   sta var_c
+   sta var_d
+   sta var_e
+   lda level_units_c
+   asl
+   asl
+   clc
+   adc #$46
+   bcs label_0c8c
+   sta level_x4_p70
 
 label_0c8c
-      ldx #$0c
-      stx $0d
-         dex
-      stx $39
+   ldx #$0c
+   stx var_f_init_12
+   dex
+   stx var_g_init_11
    jsr label_114c
-      lda p1_lives
-      beq label_0c9f
-      ldx #$00
+   lda p1_lives
+   beq label_0c9f
+   ldx #$00
    jsr label_19a8
 
 label_0c9f
-      lda p2_lives
-      beq label_0ca8
-      ldx #$01
+   lda p2_lives
+   beq label_0ca8
+   ldx #$01
    jsr label_19a8
 
 label_0ca8
@@ -1024,13 +1071,13 @@ label_0d0b
       sta $3f
 
 label_0d1b
-      dec $6c
+      dec var_e
       bne label_0d33
-      lda $41
-      sta $6c
+      lda var_d
+      sta var_e
       lda jiffy_clock
       sta $fc
-      lda $41
+      lda var_d
       cmp #$ff
       beq label_0d33
 
@@ -1046,10 +1093,10 @@ label_0d33
    lda sid_voice3_oscillator_ro
       cmp #$c8
       bcc label_0d55
-      lda $6b
+      lda var_b_init_zero
       cmp #$05
       bcs label_0d55
-      inc $6b
+      inc var_b_init_zero
    jsr label_12d2
       lda #$3f
    jsr label_0fa5
@@ -1334,7 +1381,7 @@ label_0eb5
       sta $c3
       lda #$00
       sta $bb
-      ldx level_units
+      ldx level_units_a
       lda level_tens
       bne label_0ed2
       cpx #$05
@@ -1431,6 +1478,8 @@ label_0f49
 
 ; ---------------------------------------------------------------------
          
+!zone update_status_bar
+  
 update_status_bar:
    ldx #$07
    clc
@@ -1459,12 +1508,12 @@ update_status_bar_not_scores:
    lda level_tens
    adc #$30
    sta screen+63  ; Level tens
-   lda level_units
+   lda level_units_a
    adc #$30 
    sta screen+64  ; Level units
 
 update_status_bar_just_shields:
-   lda p1_shields      ; Player 1 shields
+   lda entity_shields      ; Player 1 shields
    clc
    adc #$30
    sta screen+49
@@ -1616,9 +1665,9 @@ label_1167
       cpy #$13
       bcc label_1167
       ldx #$0c
-      stx $0d
+      stx var_f_init_12
          dex
-      stx $39
+      stx var_g_init_11
    lda sid_voice3_oscillator_ro
       and #$1f
       adc #$28
@@ -1631,7 +1680,7 @@ label_118a
    lda sid_voice3_oscillator_ro
       and #$0f
          tax
-      lda $4b
+      lda level_units_c
    cmp $1f48, x
       bcc label_118a
    lda $4096, x
@@ -1659,7 +1708,7 @@ label_11bd
       stx $44
    jsr label_0d76
       ldx $44
-      lda $4b
+      lda level_units_c
    cmp $1fe2, x
       bcc label_11dc
    lda sid_voice3_oscillator_ro
@@ -1679,7 +1728,7 @@ label_11dc
       lda $44
       cmp #$0c
       bne label_120f
-      lda $4b
+      lda level_units_c
       cmp #$14
       bcc label_120f
       lda #$02
@@ -1687,7 +1736,7 @@ label_11dc
       lda #$49
    sta $4400, x
       lda #$05
-   sta p1_shields, x
+   sta entity_shields, x
       lda #$18
    sta $4500, x
 
@@ -1695,16 +1744,16 @@ label_120f
       lda $8e
       bpl label_1219
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
          rts
 
 label_1219
-   ldy $4f00, x
-   lda $4e00, x
-         tax
-      lda #$00
+   ldy entity_y_coords, x
+   lda entity_x_coords, x
+   tax
+   lda #$00
    jsr label_0fc5
-      lda #$00
+   lda #$00
    jmp label_0fa5
 
 ; --------------------------------------------------------------------   
@@ -1718,26 +1767,28 @@ label_122a
    jmp label_1b35
 
 label_1239
-      cpy #$02
-      bcs label_1246
-      ldy #$00
-      cmp #$05
-      beq label_124f
-         iny
-      bne label_124f
+   cpy #$02
+   bcs label_1246
+   ldy #$00
+   cmp #$05
+   beq label_124f
+   iny
+   bne label_124f
 
 label_1246
-      ldy $66
-      beq label_124f
-      ldy $67
-      bne label_1258
-         iny
+   ldy $66
+   beq label_124f
+   ldy $67
+   bne label_1258
+   iny
 
 label_124f
    sta $0066, y
-      lda #$14
+   lda #$14
    sta $0068, y
-         rts
+   rts
+   
+; ---------------------------------------------------------------------
 
 label_1258
       ldy #$00
@@ -1800,19 +1851,19 @@ label_12b4
          rts
 
 label_12b5
-   lda $4f00, x
-   jsr label_1985
-         tay
-   lda $4e00, x
-   jsr label_197a
-         tax
+   lda entity_y_coords, x
+   jsr wraparound_y_coordinate_a
+   tay
+   lda entity_x_coords, x
+   jsr wraparound_x_coordinate_a
+   tax
 
 label_12c3
-      lda $fc
+   lda $fc
    jsr label_0fc5
-      lda $fb
+   lda $fb
    jsr label_0fa5
-      lda $8d
+   lda $8d
    jmp label_0fe8
 
 label_12d2
@@ -1873,14 +1924,14 @@ label_1328
       bpl label_130d
 
 label_132b
-      ldx $c9
+      ldx var_a_init_zero
          inx
       cpx #$08
       bcc label_1334
       ldx #$00
 
 label_1334
-      stx $c9
+      stx var_a_init_zero
    lda $4020, x
       beq label_132b
 
@@ -1894,7 +1945,7 @@ label_133b
       cpy #$0c
       bcs label_1359
       ldy $0a
-   lda p1_shields, y
+   lda entity_shields, y
       bne label_1359
    lda $4c00, y
       bne label_1361
@@ -1936,7 +1987,7 @@ label_1396
       adc #$14
       sta $fc
       ldy $fe
-   lda $4e00, y
+   lda entity_x_coords, y
       cmp #$1e
       bcs label_13b0
       lda #$ff
@@ -1951,17 +2002,17 @@ label_13b0
 
 label_13b6
    sta $d010
-   lda $4e00, y
-         asl
-         asl
-         asl
-         clc
-      adc $fc
-      sta $fc
-         txa
-         asl
-         tay
-      lda $fc
+   lda entity_x_coords, y
+   asl
+   asl
+   asl
+   clc
+   adc $fc
+   sta $fc
+   txa
+   asl
+   tay
+   lda $fc
    sta $d000, y
       ldy $fe
    lda $4500, y
@@ -1978,7 +2029,7 @@ label_13dc
       adc #$2d
       sta $fc
       ldy $fe
-   lda $4f00, y
+   lda entity_y_coords, y
          asl
          asl
          asl
@@ -2003,9 +2054,9 @@ label_13fa
       lda $04
    jsr label_1447
          pla
-   sta $4e00, x
+   sta entity_x_coords, x
          pla
-   sta $4f00, x
+   sta entity_y_coords, x
    jsr load_two_low_bits_of_osc3_to_accumulator
    sta $5100, x
       lda #$01
@@ -2018,21 +2069,21 @@ label_1421
       ldx #$0c
 
 label_1423
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_143e
          inx
       bne label_1423
-      ldx $39
+      ldx var_g_init_11
          inx
       bne label_1432
       ldx #$0c
 
 label_1432
-      stx $39
+      stx var_g_init_11
    jsr label_14a4
-      ldx $39
+      ldx var_g_init_11
    jsr label_1cef
-      ldx $39
+      ldx var_g_init_11
 
 label_143e
       cpx $48
@@ -2067,7 +2118,7 @@ label_1447
    lda $1f6c, y
          pha
       and #$0f
-   sta p1_shields, x
+   sta entity_shields, x
          pla
          lsr
          lsr
@@ -2200,31 +2251,31 @@ label_153a
    lda sid_voice3_oscillator_ro
       bne label_1549
    lda sid_voice3_oscillator_ro
-      cmp $d7
+      cmp level_x4_p70
       bcs label_1549
    jsr label_118a
 
 label_1549
-      inc $0d
-      ldx $0d
+      inc var_f_init_12
+      ldx var_f_init_12
       cpx $48
       bcc label_1563
       beq label_1555
       bcs label_155c
 
 label_1555
-   lda p1_shields, x
+   lda entity_shields, x
       bne label_1568
       dec $48
 
 label_155c
       ldx #$0b
-      stx $0d
+      stx var_f_init_12
       inc $3c
          rts
 
 label_1563
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_1549
 
 label_1568
@@ -2261,9 +2312,9 @@ label_1594
 label_15a2
    ldy $4300, x
       bmi label_15ad
-      dec $41
+      dec var_d
       bne label_15ad
-      inc $41
+      inc var_d
 
 label_15ad
       cmp #$40
@@ -2275,7 +2326,7 @@ label_15ad
 
 label_15bc
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
    jmp label_14a4
 
 label_15c4
@@ -2283,7 +2334,7 @@ label_15c4
       ldy #$03
 
 label_15c9
-      ldx $0d
+      ldx var_f_init_12
    lda $4061, y
       cmp #$3f
       bcc label_15e0
@@ -2306,7 +2357,7 @@ label_15e6
       bcc label_1609
       cmp #$12
       beq label_1609
-      ldx $0d
+      ldx var_f_init_12
    lda $4500, x
       and #$10
       bne label_1600
@@ -2319,7 +2370,7 @@ label_1600
       beq label_1660
 
 label_1609
-      ldx $0d
+      ldx var_f_init_12
    cmp $4100, x
       beq label_161a
    cmp $4900, x
@@ -2352,12 +2403,12 @@ label_1634
       beq label_164f
 
 label_1648
-      ldx $0d
+      ldx var_f_init_12
    lda $4400, x
       bpl label_1656
 
 label_164f
-      ldx $0d
+      ldx var_f_init_12
    jsr label_1828
       bne label_1660
 
@@ -2378,7 +2429,7 @@ label_1660
    jmp label_15e0
 
 label_1673
-      ldx $0d
+      ldx var_f_init_12
    lda $5100, x
          tax
          tay
@@ -2440,7 +2491,7 @@ label_16d1
          dey
       bpl label_16c8
       lda $0e
-      ldx $0d
+      ldx var_f_init_12
    cmp $5100, x
       beq label_16e8
    sta $5100, x
@@ -2448,7 +2499,7 @@ label_16d1
    jmp label_1809
 
 label_16e8
-      ldx $0d
+      ldx var_f_init_12
       ldy $0e
    lda $4065, y
       cmp #$01
@@ -2492,7 +2543,7 @@ label_173e
    jmp label_1d7b
 
 label_1741
-      ldx $0d
+      ldx var_f_init_12
       lda #$09
    sta $4d00, x
    sta $4700, x
@@ -2505,7 +2556,7 @@ label_174e
       cmp #$3f
       bne label_1770
    inc $5000, x
-   inc p1_shields, x
+   inc entity_shields, x
    lda $4100, x
       cmp #$06
       bne label_1767
@@ -2529,11 +2580,11 @@ label_1775
       sta $0a
       stx $09
    jsr label_1bfb
-      ldx $0d
-   lda p1_shields, x
+      ldx var_f_init_12
+   lda entity_shields, x
       beq label_17f6
       ldx $0a
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_17e1
       bne label_17d9
 
@@ -2542,14 +2593,14 @@ label_1794
    lda $4100, x
       cmp #$03
       bne label_17d9
-      ldx $0d
+      ldx var_f_init_12
    lda $4100, x
       cmp #$04
       bne label_17d9
    lda $5000, x
          pha
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
       sty $0a
    jsr label_14a4
       ldy $0a
@@ -2570,12 +2621,12 @@ label_1794
    jmp label_1269
 
 label_17d9
-      ldx $0d
+      ldx var_f_init_12
    jsr label_1d90
    jmp label_1269
 
 label_17e1
-      ldx $0d
+      ldx var_f_init_12
    jsr label_1d7b
    jmp label_1809
 
@@ -2612,7 +2663,7 @@ label_180b
 label_1811
    jsr label_1421
          tya
-      ldy $0d
+      ldy var_f_init_12
    jsr label_1b5f
       lda #$06
          tay
@@ -2758,7 +2809,7 @@ label_18d9
 label_190f
    jsr label_1bfb
       ldy $0a
-   lda p1_shields, y
+   lda entity_shields, y
       bne label_191e
       ldx $09
    jmp label_14b8
@@ -2782,20 +2833,21 @@ label_1932
       sta $aa, x
 
 label_1936
-      ldy #$01
-      lda #$04
+   ldy #$01
+   lda #$04
    jsr label_1239
-   ldy p1_shields, x
-         iny
-      cpy #$0a
-      bcc label_1947
-      ldy #$09
+   ldy entity_shields, x   ; Add 1 shield to entity x
+   iny
+   cpy #$0a                ; Cap at 9
+   bcc label_1947
+   ldy #$09
 
 label_1947
-         tya
-   sta p1_shields, x
+   tya
+   sta entity_shields, x
    jsr update_status_bar_just_shields
    jmp label_1959
+   
 !byte $D0,$06
 
 label_1953
@@ -2803,81 +2855,106 @@ label_1953
    jmp label_189c
 
 label_1959
-      ldx $05
+   ldx $05
    jmp label_1d7b
 
 label_195e
    ldy $5100, x
 
 label_1961
-   lda $4e00, x
-         clc
+   lda entity_x_coords, x
+   clc
    adc $1ee3, y
-   jsr label_197a
-      sta $07
-   lda $4f00, x
-         clc
+   jsr wraparound_x_coordinate_a
+   sta $07
+   lda entity_y_coords, x
+   clc
    adc $1ee7, y
-   jsr label_1985
-      sta $08
-         rts
+   jsr wraparound_y_coordinate_a
+   sta $08
+   rts
 
-label_197a
-      bpl label_197e
-      lda #$26
+; -----------------------------------------------------------------
+; If accumulator is 0-38 (valid x locations), leave unchanged.
+; If negative, set to 38 (left wrap).
+; If 39 or more, set to 0 (right wrap).
+ 
+!zone wraparound_x_coordinate_a
+  
+wraparound_x_coordinate_a
+  bpl .no_left_wrap
+  lda #$26
 
-label_197e
-      cmp #$27
-      bcc label_1984
-      lda #$00
+.no_left_wrap
+  cmp #$27
+  bcc .no_right_wrap
+  lda #$00
 
-label_1984
-         rts
+.no_right_wrap
+  rts
 
-label_1985
-      cmp #$01
-      bne label_198b
-      lda #$18
+; ----------------------------------------------------------------
+         
+; If accumulator is 2-24 (valid y locations on screen after status 
+; bar), leave unchanged.
+; If it's 1 (one line off the top), wrap around to 24. If it's 
+; over 24, wrap around to 2.
 
-label_198b
-      cmp #$19
-      bcc label_1991
-      lda #$02
+!zone wraparound_y_coordinate_a
+  
+wraparound_y_coordinate_a
+  cmp #$01            ; Accumulator != 1?
+  bne .no_top_wrap
+  lda #$18
 
-label_1991
-         rts
+.no_top_wrap
+  cmp #$19            ; Accumulator < $19 (25?)
+  bcc .no_bottom_wrap
+  lda #$02
 
-label_1992
+.no_bottom_wrap
+  rts
+
+; ----------------------------------------------------------------
+
+!zone flip_top_bit_and_clear_third_bit_of_4500
+  
+flip_top_bit_and_clear_third_bit_of_4500
    lda $4500, x
-      eor #$80
+   eor #$80
    sta $4500, x
    lda $4500, x
-      and #$fb
+   and #$fb
    sta $4500, x
-         rts
+   rts
 
+; -----------------------------------------------------------------         
+         
 label_19a3
-      dec p1_lives, x
+   dec p1_lives, x
    jsr load_3_2_6_to_14_aa_be_with_x_offset
 
+   
+; Called with x=0 and x=1 for player processing??   
+   
 label_19a8
-      lda $4b
-         lsr
-      sta $3f
-      stx $05
-      lda p1_lives, x
-      beq label_1a0d
-      lda #$10
-   jsr label_1447
-      lda $14, x
-   sta p1_shields, x
-      lda #$01
-      sta $49, x
-      sta $4e, x
-   lda $1f18, x
-      ora #$20
-   sta $4400, x
-   lda $1f07, x
+  lda level_units_c
+  lsr
+  sta $3f
+  stx $05
+  lda p1_lives, x
+  beq .player_dead_dead
+  lda #$10
+  jsr label_1447
+  lda p1_shields_copy, x
+  sta entity_shields, x
+  lda #$01
+  sta player_var_ua, x
+  sta player_var_ub, x
+  lda $1f18, x
+  ora #$20
+  sta $4400, x
+  lda $1f07, x
       sta $07
       lda #$17
       sta $08
@@ -2902,16 +2979,18 @@ label_19f6
    jsr label_14a4
       ldx $0a
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
    jsr label_1cef
 
 label_1a08
       ldy $05
    jsr label_122a
 
-label_1a0d
-   jmp update_status_bar_not_scores
+.player_dead_dead
+   jmp update_status_bar_not_scores   ; Tail call RTS
 
+; ------------------------------------------------------------------
+   
 label_1a10
       stx $05
    lda $4800, x
@@ -2938,9 +3017,9 @@ label_1a1d
 
 label_1a3e
       ldx $05
-   lda $4e00, x
+   lda entity_x_coords, x
       sta $03
-   lda $4f00, x
+   lda entity_y_coords, x
       sta $fb
 
 label_1a4a
@@ -2948,13 +3027,13 @@ label_1a4a
       lda $03
          clc
    adc $1ee3, y
-   jsr label_197a
+   jsr wraparound_x_coordinate_a
          tax
       sta $03
       lda $fb
          clc
    adc $1ee7, y
-   jsr label_1985
+   jsr wraparound_y_coordinate_a
          tay
       sta $fb
    jsr label_0fae
@@ -3022,9 +3101,9 @@ label_1ac6
 
 label_1ace
       lda $07
-   sta $4e00, x
+   sta entity_x_coords, x
       lda $08
-   sta $4f00, x
+   sta entity_y_coords, x
          rts
 
 label_1ad9
@@ -3033,7 +3112,7 @@ label_1ad9
       sta $46
 
 label_1adf
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_1af4
    lda $4500, x
       bpl label_1aef
@@ -3063,8 +3142,8 @@ label_1aff
 
 label_1b05
       stx $09
-   ldy $4f00, x
-   lda $4e00, x
+   ldy entity_y_coords, x
+   lda entity_x_coords, x
          tax
 
 label_1b0e
@@ -3081,7 +3160,7 @@ label_1b17
       and #$10
       bne label_1b16
       ldy $3a
-   lda $004e, y
+   lda player_var_ub, y
       beq label_1b25
          rts
 
@@ -3090,7 +3169,7 @@ label_1b25
    jsr label_1239
       ldy $3a
    lda $00be, y
-   sta $004e, y
+   sta player_var_ub, y
    lda $5100, y
 
 label_1b35
@@ -3099,22 +3178,22 @@ label_1b35
       ldx #$02
 
 label_1b3b
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_1b59
          inx
       cpx #$0c
       bne label_1b3b
-      ldx $4c
+      ldx var_c
       stx $fd
    jsr label_14a4
-      ldx $4c
+      ldx var_c
          inx
       cpx #$0c
       bne label_1b55
       ldx #$02
 
 label_1b55
-      stx $4c
+      stx var_c
       ldx $fd
 
 label_1b59
@@ -3150,7 +3229,7 @@ label_1b88
       and #$40
       beq label_1b9f
       lda #$20
-   sta p1_shields, x
+   sta entity_shields, x
 
 label_1b9f
    ldy $5100, x
@@ -3180,7 +3259,7 @@ label_1bc6
       cmp #$40
       bcs label_1bd9
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
          rts
 
 label_1bd9
@@ -3188,7 +3267,7 @@ label_1bd9
    jsr label_1aff
    jsr label_1bfb
       ldx $0a
-   lda p1_shields, x
+   lda entity_shields, x
       bmi label_1bea
       bne label_1bf8
 
@@ -3198,10 +3277,10 @@ label_1bea
 label_1beb
    lda $4300, x
       bmi label_1bf8
-      inc $41
+      inc var_d
       bne label_1bf8
       lda #$ff
-      sta $41
+      sta var_d
 
 label_1bf8
    jmp label_1269
@@ -3215,7 +3294,7 @@ label_1bfb
    lda $4500, x
       and #$20
       beq label_1c33
-   lda p1_shields, x
+   lda entity_shields, x
       cmp #$14
       bcs label_1c33
    lda $5100, y
@@ -3233,7 +3312,7 @@ label_1bfb
 
 label_1c33
       ldx $0a
-   dec p1_shields, x
+   dec entity_shields, x
       lda #$01
    jsr label_12fb
       ldy #$03
@@ -3241,7 +3320,7 @@ label_1c33
    lda $4500, x
       and #$20
       beq label_1c4c
-   dec p1_shields, x
+   dec entity_shields, x
    bit $07a0
       sty $0b
    lda $4100, x
@@ -3251,14 +3330,14 @@ label_1c33
       bmi label_1c7c
       cmp #$02
       bcs label_1c7c
-   lda p1_shields, x
+   lda entity_shields, x
       cmp #$02
       bcc label_1c7c
 
 label_1c67
       ldx $0a
       lda #$00
-   sta p1_shields, x
+   sta entity_shields, x
       beq label_1c7c
    lda $4500, x
       and #$20
@@ -3268,7 +3347,7 @@ label_1c67
 
 label_1c7c
       ldx $0a
-   lda p1_shields, x
+   lda entity_shields, x
       bne label_1c95
       lda $0b
       cmp #$07
@@ -3283,7 +3362,7 @@ label_1c8d
 
 label_1c95
       ldx $09
-   lda p1_shields, x
+   lda entity_shields, x
       bne label_1ca4
    jsr label_14a4
       ldx $09
@@ -3294,7 +3373,7 @@ label_1ca4
       cpx #$02
       bcs label_1cb7
    jsr update_status_bar_just_shields
-   lda p1_shields, x
+   lda entity_shields, x
       bmi label_1cb4
       bne label_1cb7
 
@@ -3306,7 +3385,7 @@ label_1cb7
       cmp #$02
       bcs label_1cc9
       ldy $0a
-   ldx p1_shields, y
+   ldx entity_shields, y
       bne label_1cc9
          tax
    jsr label_14b8
@@ -3331,7 +3410,7 @@ label_1cd9
       cpx #$02
       bcs label_1cee
    jsr update_status_bar_just_shields
-   lda p1_shields, x
+   lda entity_shields, x
       beq label_1cb4
       bmi label_1cb4
 
@@ -3370,8 +3449,8 @@ label_1d0f
    sta $6045, y
       lda #$00
    sta $5000, x
-      lda $47
-      cmp $4b
+      lda level_units_b
+      cmp level_units_c
       bne label_1d3b
          asl
          asl
@@ -3384,7 +3463,7 @@ label_1d3b
    jsr label_14cb
          dex
       bpl label_1d0f
-   ldx level_units
+   ldx level_units_a
    inx
    cpx #10
    bcc .no_level_tens_increase
@@ -3392,18 +3471,18 @@ label_1d3b
    inc level_tens
 
 .no_level_tens_increase
-   stx level_units
+   stx level_units_a
 
 label_1d4e
    jsr label_1d99
    bne label_1d4e
    jsr update_status_bar
    jsr label_0ea7
-   lda p1_shields
-   sta $14
+   lda entity_shields
+   sta p1_shields_copy
    lda p2_shields
-   sta $15
-   inc $4b
+   sta p2_shields_copy
+   inc level_units_c
    jmp label_0c6c
 
 label_1d68
@@ -3412,7 +3491,7 @@ label_1d68
       ldx $13
    jsr label_195e
    jsr label_1ace
-   jsr label_1992
+   jsr flip_top_bit_and_clear_third_bit_of_4500
    jmp label_1269
 
 label_1d7b
@@ -3420,7 +3499,7 @@ label_1d7b
    lda $4500, x
       and #$fb
    sta $4500, x
-   jsr label_1992
+   jsr flip_top_bit_and_clear_third_bit_of_4500
    jsr label_1269
       ldx $13
    jmp label_126e
@@ -3453,7 +3532,7 @@ label_1db0
       and #$03
       bne label_1dca
       lda #$02
-      cmp $4b
+      cmp level_units_c
       bcs label_1dca
    lda sid_voice3_oscillator_ro
       and #$01
@@ -3473,10 +3552,10 @@ label_1dd2
 
 load_3_2_6_to_14_aa_be_with_x_offset
       lda #$03
-      sta $14, x       
+      sta p1_shields_copy, x       
       lda #$02
       sta $aa, x
-      lda #$06
+      lda #$06 
       sta $be, x
       rts
  
