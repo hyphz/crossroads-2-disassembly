@@ -235,6 +235,7 @@ second_frames:
 !byte %...####.
 !byte %....#...
 !byte %....##..
+
 !byte %..###...
 !byte %.##.##..
 !byte %.#####.#
@@ -243,6 +244,7 @@ second_frames:
 !byte %..##..##
 !byte %..#....#
 !byte %..##....
+
 !byte %..##....
 !byte %#.#..###
 !byte %.###.#.#
@@ -251,6 +253,7 @@ second_frames:
 !byte %#.##....
 !byte %...#....
 !byte %...##...
+
 !byte %........
 !byte %.....###
 !byte %##...#.#
@@ -259,6 +262,7 @@ second_frames:
 !byte %..###.##
 !byte %...#....
 !byte %...##...
+
 !byte %........
 !byte %..##....
 !byte %..#.....
@@ -267,6 +271,7 @@ second_frames:
 !byte %..##....
 !byte %..#.....
 !byte %..##....
+
 !byte %.######.
 !byte %##..####
 !byte %########
@@ -275,6 +280,7 @@ second_frames:
 !byte %.#######
 !byte %..##....
 !byte %..###...
+
 !byte %..####..
 !byte %.###..#.
 !byte %#######.
@@ -283,6 +289,7 @@ second_frames:
 !byte %########
 !byte %.#######
 !byte %...###..
+
 !byte %#####...
 !byte %#.#####.
 !byte %########
@@ -291,6 +298,7 @@ second_frames:
 !byte %.######.
 !byte %.##.....
 !byte %.###....
+
 !byte %..#..###
 !byte %.##.##.#
 !byte %#..#####
@@ -299,6 +307,7 @@ second_frames:
 !byte %..####..
 !byte %..##....
 !byte %..###...
+
 !byte %########
 !byte %####...#
 !byte %########
@@ -307,6 +316,7 @@ second_frames:
 !byte %.######.
 !byte %..###...
 !byte %..####..
+
 !byte %.#..###.
 !byte %###.#...
 !byte %.#..###.
@@ -315,6 +325,7 @@ second_frames:
 !byte %.#..###.
 !byte %.#..##..
 !byte %....###.
+
 !byte %###...##
 !byte %##...#.#
 !byte %###.#..#
@@ -323,6 +334,7 @@ second_frames:
 !byte %###..#.#
 !byte %####..##
 !byte %#..##...
+
 !byte %........
 !byte %........
 !byte %........
@@ -331,6 +343,7 @@ second_frames:
 !byte %########
 !byte %.#####..
 !byte %..###...
+
 !byte %..####..
 !byte %..#..#..
 !byte %..#####.
@@ -339,6 +352,7 @@ second_frames:
 !byte %..####..
 !byte %...#....
 !byte %...##...
+
 !byte %........
 !byte %..##....
 !byte %.#......
@@ -347,6 +361,7 @@ second_frames:
 !byte %.####...
 !byte %..######
 !byte %...##...
+
 !byte %..#.....
 !byte %###.####
 !byte %#...#..#
@@ -355,6 +370,7 @@ second_frames:
 !byte %########
 !byte %.#..##..
 !byte %.##.#...
+
 !byte %..###...
 !byte %..###...
 !byte %..##....
@@ -363,6 +379,7 @@ second_frames:
 !byte %..##....
 !byte %..##....
 !byte %..###...
+
 !byte %........
 !byte %........
 !byte %........
@@ -371,6 +388,7 @@ second_frames:
 !byte %........
 !byte %........
 !byte %........
+
 !byte %........
 !byte %........
 !byte %...#...#
@@ -379,6 +397,7 @@ second_frames:
 !byte %.#...#..
 !byte %........
 !byte %........
+
 !byte %........
 !byte %........
 !byte %......#.
@@ -387,6 +406,7 @@ second_frames:
 !byte %........
 !byte %........
 !byte %........
+
 !byte %##.##.##
 !byte %##....##
 !byte %..####..
@@ -395,6 +415,7 @@ second_frames:
 !byte %..####..
 !byte %##....##
 !byte %##.##.##
+
 !byte %##.##.##
 !byte %###..###
 !byte %.######.
@@ -403,6 +424,7 @@ second_frames:
 !byte %.######.
 !byte %###..###
 !byte %##.##.##
+
 !byte %.######.
 !byte %#......#
 !byte %#......#
@@ -411,6 +433,7 @@ second_frames:
 !byte %#......#
 !byte %#......#
 !byte %.######.
+
 !byte %.##..##.
 !byte %#.#..#.#
 !byte %##....##
@@ -419,6 +442,7 @@ second_frames:
 !byte %##....##
 !byte %#.#..#.#
 !byte %.##..##.
+
 !byte %.######.
 !byte %#......#
 !byte %#..##..#
@@ -427,6 +451,7 @@ second_frames:
 !byte %#..##..#
 !byte %#......#
 !byte %.######.
+
 !byte %###..###
 !byte %#.#..#.#
 !byte %##.##.##
@@ -435,6 +460,7 @@ second_frames:
 !byte %##.##.##
 !byte %#.#..#.#
 !byte %###..###
+
 !byte %##.##.##
 !byte %#..##..#
 !byte %..####..
@@ -459,19 +485,22 @@ second_frames:
 * = $098d
 
 entry:
-  lda #$ff
+
+; Set up to use the SID as a fake random number generator.
+  lda #$ff                  ; Set high frequency on both bytes
   sta sid_voice3_low_freq
   sta sid_voice3_high_freq
-  lda #$80
+  lda #$80                  ; Enable noise wave
   sta sid_voice3_control
+  
   lda #$01
-  sta $02
+  sta $02   ; Unused position in zero page
   lda #$c0
   sta self_mod_sta_base_address_lo   ; self modifying
   lda #$2f  
   sta self_mod_sta_base_address_hi   ; self modifying 
   lda #$03
-  sta $06
+  sta $06   ; Unused position in zero page
 
 label_09ac
   ldx #$31
@@ -485,10 +514,10 @@ label_09ae
   adc #$08
   sta screen+$80, x
 
-loop_until_osc3_low_bits_are_both_one
+loop_until_osc3_low_bits_are_not_both_one
   jsr load_two_low_bits_of_osc3_to_accumulator
   cmp #$03
-  beq loop_until_osc3_low_bits_are_both_one
+  beq loop_until_osc3_low_bits_are_not_both_one
   cmp #$02
   bne label_09cc
   lda #$ff
@@ -501,7 +530,7 @@ label_09cf
   bne label_09db
   tay
   lda $0500, x
-  beq loop_until_osc3_low_bits_are_both_one
+  beq loop_until_osc3_low_bits_are_not_both_one
   tya
 
 label_09db
