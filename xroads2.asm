@@ -39,26 +39,28 @@ colors = $d800
 player_var_ua = $49
 player_var_ub = $4e
 
+entity_status_byte = $4500
+
 
 entity_x_coords = $4e00
 entity_y_coords = $4f00
 
+entity_facing = $5100
 
-
-
-
-; $4500 seems to show player any frame. 22 for standard, a2 for half
-; 26 if blocked
-
-; entity_x_coords PLAYER X COORDINATE 0 = left
-; entity_y_coords PLAYER Y COORDINATE 0 = top
-
-
-
-; $5100 - player facing. 0-3 down up left right
-
+found_empty_entity_number = $48
 
 screen = $0400
+stack = $0100
+
+
+proposed_entity_x_coord = $07
+proposed_entity_y_coord = $08
+
+last_facing_for_joystick_position = $04
+
+processing_entity_number = $05
+temp_entity_x_coord = $03
+
 
 
 ;to "xroads2.d64", d64
@@ -519,8 +521,6 @@ second_frames:
 !byte %.######.
 
 
-
-
 * = $098d
 
 entry:
@@ -533,7 +533,7 @@ entry:
   sta sid_voice3_control
   
   lda #$01
-  sta $02   ; Unused position in zero page
+  sta $02            ; Unused position in zero page
   lda #$c0
   sta self_mod_sta_base_address_lo   ; self modifying
   lda #$2f  
@@ -541,53 +541,77 @@ entry:
   lda #$03
   sta $06   ; Unused position in zero page
 
+ 
+; Accumulate several arrays in screen space??
+; $400 array - 10 + rand(3)
+; $480 array - 8 + rand (3)
+  
 label_09ac
   ldx #$31
 
-label_09ae
+generate_random_arrays_loop
+
+; $400 array - 10 + rand(3)
   jsr load_two_low_bits_of_osc3_to_accumulator
   clc
   adc #$0a
   sta screen, x
+  
+; $480 array - 8 + rand(3)  
   jsr load_two_low_bits_of_osc3_to_accumulator
   adc #$08
   sta screen+$80, x
 
-loop_until_osc3_low_bits_are_not_both_one
+  
+; Generate a random number that is either 0, 1, or $ff.  
+loop_until_first_array_not_3
   jsr load_two_low_bits_of_osc3_to_accumulator
   cmp #$03
-  beq loop_until_osc3_low_bits_are_not_both_one
+  beq loop_until_first_array_not_3
   cmp #$02
-  bne label_09cc
+  bne first_random_not_2
   lda #$ff
 
-label_09cc
+; Put it in $500 array at current position
+first_random_not_2
   sta screen+$100, x
 
+; Generate another random
 label_09cf
   jsr load_two_low_bits_of_osc3_to_accumulator
   bne label_09db
+  
+; If it's not zero, check that its counterpart in the $500
+; array is also not zero, and regenerate it if it is.
   tay
-  lda $0500, x
-  beq loop_until_osc3_low_bits_are_not_both_one
+  lda screen+$100, x
+  beq loop_until_first_array_not_3
   tya
 
 label_09db
+; If it's 3, reject it and generate again.
   cmp #$03
   beq label_09cf
+; If it's 2, make it $ff.
   cmp #$02
   bne label_09e5
   lda #$ff
 
 label_09e5
   sta $0580, x
+; Result: $500 and $580 are now sequences of random values that are
+; 0, 1, or ff; and where $500's is non zero if $580's is. 
+  
   lda sid_voice3_oscillator_ro
-  and #$0f
-  adc #$05
-  sta $0600, x
+  and #$0f    ; Random value 0-15..
+  adc #$05    ; +5.
+  sta $0600, x  ; Identical in $600 and $680 arrays.
   sta $0680, x
-  dex
-  bpl label_09ae
+  dex              
+  bpl generate_random_arrays_loop 
+  
+; ------------------ Random seeding loop ends here  
+  
   lda #$1a
   sta $fb
 
@@ -602,22 +626,28 @@ label_0a01
  bpl label_0a20
  lda $0600, x
  sta $0680, x
+ 
+; Add each value in $500 array to parallel value in $400 array. 
+ 
  lda $0400, x
  clc
  adc $0500, x
  sta $0400, x
+ 
+; Add each value in $580 array to parallel value in $480 array.
+
  lda $0480, x
  clc
  adc $0580, x
  sta $0480, x
 
 label_0a20
- lda $06
+ lda $06             ; This was set to 3 above.
  bne label_0a55
  lda $0400, x
  bmi label_0a55
  pha
- and #$07
+ and #$07            
  tay
  pla
  lsr
@@ -636,16 +666,18 @@ label_0a20
  jsr self_modified_lda_plus_y
  ora $fd
  pha
- stx $03
+ stx temp_entity_x_coord
  tya
  tax
  pla
  jsr self_modified_sta_plus_x
- ldx $03
+ ldx temp_entity_x_coord
 
 label_0a55
  dex
  bpl label_0a01
+ 
+ 
  dec $06
  bpl label_09ff
  lda #$03
@@ -717,9 +749,9 @@ label_0ab7
  cmp #$0a
  bcc label_0ab7
  lda #$cc
- sta $d016
+ sta $d016   ; Set 40 column screen width 
  lda #$ff
- sta $d015
+ sta $d015   ; Enable all sprites
  lda #$00
  sta $d021   ; Background color
  sta $d020   ; Border color
@@ -769,35 +801,35 @@ label_0b30
    jsr clear_explosions
        ldx #$07
        stx var_f_init_12
-      stx $48
+      stx found_empty_entity_number
       stx $52
     sta $4060
 
 label_0b3e
-    sta player_1_score_digits, x
-    sta player_2_score_digits, x
-          dex
-       bpl label_0b3e
-          tax
+  sta player_1_score_digits, x
+  sta player_2_score_digits, x
+  dex
+  bpl label_0b3e
+  tax
 
 label_0b48
-    sta entity_shields, x
-    sta $5000, x
-          inx
-       bne label_0b48
-       sta $ae
-       sta $af
-       sta level_tens
-          dex
-       stx level_x4_p70
-       lda #$0a
-       sta level_units_c
-       sta level_units_a
-       lda #<msg_banner
-       ldy #>msg_banner
-    jsr output_string_at_yyaa_until_zero_or_quote
-    jsr label_0ea7
-       ldx #$0f
+  sta entity_shields, x
+  sta $5000, x
+  inx
+  bne label_0b48
+  sta $ae
+  sta $af
+  sta level_tens
+  dex
+  stx level_x4_p70
+  lda #$0a
+  sta level_units_c
+  sta level_units_a
+  lda #<msg_banner
+  ldy #>msg_banner
+  jsr output_string_at_yyaa_until_zero_or_quote
+  jsr label_0ea7
+  ldx #$0f
 
 label_0b6c
     lda $1e86, x
@@ -827,7 +859,7 @@ label_0b88
        sbc #$60
           tay
        lda #$00
-    sbc $1f20, y
+    sbc spar_images, y
 
 label_0b9a
          clc
@@ -1246,7 +1278,7 @@ label_0e15
 
 label_0e1d
       lda #$00
-      sta $03
+      sta temp_entity_x_coord
 
 label_0e21
       lda #$00
@@ -1258,7 +1290,7 @@ label_0e25
       adc $fd
          tay
    jsr self_modified_lda_plus_y
-      ldx $03
+      ldx temp_entity_x_coord
    and $1ef6, x
    cmp $1ef6, x
       bne label_0e4e
@@ -1281,8 +1313,8 @@ label_0e4e
       lda $fe
       cmp #$08
       bne label_0e25
-      inc $03
-      lda $03
+      inc temp_entity_x_coord
+      lda temp_entity_x_coord
       cmp #$08
       bne label_0e21
       lda $fc
@@ -1525,23 +1557,23 @@ update_status_bar_just_shields:
 ; ----------------------------------------------------------------------
    
 label_0fa5
-      sta $0c
-      lda #$9d
+   sta $0c
+   lda #$9d
    sta $0fc1
-      bne label_0fb3
+   bne label_0fb3
 
 label_0fae
-      lda #$bd
-   sta $0fc1
+   lda #$bd
+   sta $0fc1         ; 
 
 label_0fb3
    lda $6000, y
-   sta $0fc2
+   sta $0fc2            
    lda $6019, y
    sta $0fc3
-      lda $0c
+   lda $0c           ; ??
    lda $0400, x
-         rts
+   rts
 
 ; ----------------------------------------------------------------------         
          
@@ -1640,7 +1672,7 @@ clear_explosions
 
 label_114c
       lda #$00
-      sta $48
+      sta found_empty_entity_number
       sta $bc
       ldx #$12
       lda #$ff
@@ -1738,7 +1770,7 @@ label_11dc
       lda #$05
    sta entity_shields, x
       lda #$18
-   sta $4500, x
+   sta entity_status_byte, x
 
 label_120f
       lda $8e
@@ -1815,18 +1847,18 @@ label_126e
 
 label_1279
       stx $8d
-   lda $5100, x
+   lda entity_facing, x
          tay
    lda $1f0b, y
          clc
    adc $4200, x
       sta $fb
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_128f
       inc $fb
 
 label_128f
-   lda $4500, x
+   lda entity_status_byte, x
       and #$04
       beq label_129c
       inc $fb
@@ -1834,17 +1866,17 @@ label_128f
       inc $fb
 
 label_129c
-      stx $03
+      stx temp_entity_x_coord
    jsr label_12b5
-      ldx $03
-   lda $4500, x
+      ldx temp_entity_x_coord
+   lda entity_status_byte, x
       bpl label_12b4
       inc $fb
 
 label_12aa
-   jsr label_195e
-      ldx $07
-      ldy $08
+   jsr propose_forward_moove_coords_for_entity_x
+      ldx proposed_entity_x_coord
+      ldy proposed_entity_y_coord
    jsr label_12c3
 
 label_12b4
@@ -1971,13 +2003,13 @@ label_1361
          tay
    lda $4400, y
    sta $d027, x
-   lda $4500, y
+   lda entity_status_byte, y
       bmi label_138d
       lda #$00
       beq label_1396
 
 label_138d
-   lda $5100, y
+   lda entity_facing, y
          tay
       sta $fd
    lda $1edb, y
@@ -2015,7 +2047,7 @@ label_13b6
    lda $fc
    sta $d000, y
       ldy $fe
-   lda $4500, y
+   lda entity_status_byte, y
       bmi label_13d7
       lda #$00
       beq label_13dc
@@ -2045,62 +2077,69 @@ label_13dc
          rts
 
 label_13fa
-      sta $04
+      sta last_facing_for_joystick_position
          tya
          pha
          txa
          pha
    jsr label_1421
-      lda $04
+      lda last_facing_for_joystick_position
    jsr label_1447
-         pla
+   pla
    sta entity_x_coords, x
-         pla
+   pla
    sta entity_y_coords, x
    jsr load_two_low_bits_of_osc3_to_accumulator
-   sta $5100, x
-      lda #$01
+   sta entity_facing, x
+   lda #$01
    sta $4d00, x
-      lda #$00
-   sta $5000, x
-         rts
+   lda #$00
+   sta $5000, x           ; $5000.  Move speed / facing change?
+   rts
+
+; ----------------------------------------------------------------
+; May be to do with locating an unused entity?
 
 label_1421
-      ldx #$0c
-
-label_1423
-   lda entity_shields, x
-      beq label_143e
-         inx
-      bne label_1423
-      ldx var_g_init_11
-         inx
-      bne label_1432
-      ldx #$0c
+  ldx #$0c   ; $c seems to be the first offset for enemy entities.
+   
+.find_zero_shield_entity
+  lda entity_shields, x
+  beq .found_zero_shield_entity
+  inx
+  bne .find_zero_shield_entity
+   
+  ldx var_g_init_11      ; Entity max?
+  inx                    
+  bne label_1432           
+  ldx #$0c               ; Reuse 1st entity??
 
 label_1432
-      stx var_g_init_11
-   jsr label_14a4
-      ldx var_g_init_11
-   jsr label_1cef
-      ldx var_g_init_11
+  stx var_g_init_11
+  jsr label_14a4
+  ldx var_g_init_11
+  jsr label_1cef
+  ldx var_g_init_11
 
-label_143e
-      cpx $48
-      bcc label_1444
-      stx $48
+.found_zero_shield_entity
+  cpx found_empty_entity_number
+  bcc label_1444
+  stx found_empty_entity_number
 
 label_1444
-      stx $a3
-         rts
+  stx $a3
+  rts
 
+; -----------------------------------------------------------------
+; Some kind of new entity setup??         
+         
 label_1447
          tay
    sta $4100, x
    lda $1fba, y
    sta $4400, x
    lda $1fce, y
-   sta $4500, x
+   sta entity_status_byte, x
    lda $1f94, y
    sta $4a00, x
    lda $1fa6, y
@@ -2145,6 +2184,8 @@ label_1447
    sta $4200, x
          rts
 
+; -------------------------------------------------------------------         
+         
 label_14a4
       lda #$20
       sta $fb
@@ -2153,7 +2194,7 @@ label_14a4
    jsr label_12b5
          pla
          tax
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_14b7
    jmp label_12aa
 
@@ -2170,7 +2211,7 @@ label_14b8
    jmp update_status_bar
 
 label_14cb
-      stx $07
+      stx proposed_entity_x_coord
       lda #$05
       sta $fc
          clc
@@ -2193,7 +2234,7 @@ label_14ea
          dex
       dec $fc
       bpl label_14d6
-      ldx $07
+      ldx proposed_entity_x_coord
    ldy $1f15, x
    lda $6043, y
          lsr
@@ -2236,7 +2277,7 @@ label_1526
       bcc label_1519
 
 label_152a
-      ldx $07
+      ldx proposed_entity_x_coord
          rts
 
 label_152d
@@ -2258,7 +2299,7 @@ label_153a
 label_1549
       inc var_f_init_12
       ldx var_f_init_12
-      cpx $48
+      cpx found_empty_entity_number
       bcc label_1563
       beq label_1555
       bcs label_155c
@@ -2266,7 +2307,7 @@ label_1549
 label_1555
    lda entity_shields, x
       bne label_1568
-      dec $48
+      dec found_empty_entity_number
 
 label_155c
       ldx #$0b
@@ -2279,7 +2320,7 @@ label_1563
       beq label_1549
 
 label_1568
-   lda $4500, x
+   lda entity_status_byte, x
       and #$40
       bne label_1549
    dec $4d00, x
@@ -2293,7 +2334,7 @@ label_1568
    jmp label_1269
 
 label_1587
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_158f
    jmp label_1d68
 
@@ -2303,7 +2344,7 @@ label_158f
 
 label_1594
       stx $13
-   jsr label_1dcf
+   jsr call_0fae_with_forward_coords_for_entity_x
       ldx $13
       cmp #$20
       bne label_15a2
@@ -2358,7 +2399,7 @@ label_15e6
       cmp #$12
       beq label_1609
       ldx var_f_init_12
-   lda $4500, x
+   lda entity_status_byte, x
       and #$10
       bne label_1600
    jsr label_1828
@@ -2381,7 +2422,7 @@ label_1609
 label_161a
       lda #$01
    sta $4069, y
-   lda $4500, x
+   lda entity_status_byte, x
       and #$08
       beq label_15e0
          tya
@@ -2396,7 +2437,7 @@ label_1634
    lda $4100, x
       cmp #$01
       bne label_1648
-   lda $5100, x
+   lda entity_facing, x
          tax
          tya
    cmp $1f0f, x
@@ -2419,18 +2460,18 @@ label_1656
    jsr label_17e9
 
 label_1660
-   lda $4500, x
+   lda entity_status_byte, x
       and #$03
-      sta $03
+      sta temp_entity_x_coord
    jsr load_two_low_bits_of_osc3_to_accumulator
          sec
-      sbc $03
+      sbc temp_entity_x_coord
    sta $407f, y
    jmp label_15e0
 
 label_1673
       ldx var_f_init_12
-   lda $5100, x
+   lda entity_facing, x
          tax
          tay
    inc $406d, x
@@ -2481,20 +2522,20 @@ label_16c6
       ldy #$03
 
 label_16c8
-      sty $04
+      sty last_facing_for_joystick_position
       cpy $0e
       beq label_16d1
    jsr label_180b
 
 label_16d1
-      ldy $04
+      ldy last_facing_for_joystick_position
          dey
       bpl label_16c8
       lda $0e
       ldx var_f_init_12
-   cmp $5100, x
+   cmp entity_facing, x
       beq label_16e8
-   sta $5100, x
+   sta entity_facing, x
    jsr label_1269
    jmp label_1809
 
@@ -2514,29 +2555,29 @@ label_16e8
    sta $4d00, x
    sta $4700, x
    ldx $40ae, y
-   lda $5100, x
+   lda entity_facing, x
       sta $0a
          tay
    lda $1f0f, y
       cmp $0e
       beq label_1729
-   ldy $4500, x
+   ldy entity_status_byte, x
       bmi label_172e
       ldy $0e
    lda $1f0f, y
-   sta $5100, x
+   sta entity_facing, x
    jmp label_1269
 
 label_1729
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_173e
 
 label_172e
    jsr label_1d68
       ldx $8d
-   lda $4500, x
+   lda entity_status_byte, x
       ora #$04
-   sta $4500, x
+   sta entity_status_byte, x
    jmp label_1269
 
 label_173e
@@ -2605,15 +2646,15 @@ label_1794
    jsr label_14a4
       ldy $0a
    ldx $40ae, y
-   lda $4500, x
+   lda entity_status_byte, x
       and #$80
          pha
       lda #$02
    jsr label_1447
          pla
-   ora $4500, x
+   ora entity_status_byte, x
       and #$bf
-   sta $4500, x
+   sta entity_status_byte, x
          pla
          clc
    adc $5000, x
@@ -2622,7 +2663,7 @@ label_1794
 
 label_17d9
       ldx var_f_init_12
-   jsr label_1d90
+   jsr flip_bit_3_on_status_of_entity_x
    jmp label_1269
 
 label_17e1
@@ -2641,17 +2682,21 @@ label_17e9
 label_17f6
          rts
 
+; -------------------------------------------------------------------
+         
 label_17f7
-      lda #$28
-         sec
-   sbc $4065, y
-      sta $03
-   lda $406d, y
-         sec
-      sbc $03
+   lda #$28      ; 40
+   sec
+   sbc $4065, y  ; a = 40-(4065 entry)
+   sta temp_entity_x_coord       ; $03 = 40-(4065 entry)
+   lda $406d, y  ; a = (406d entry)
+   sec
+   sbc temp_entity_x_coord       ; a = (406d entry)-40-(4065 entry)
    sta $406d, y
-         rts
+   rts
 
+; ------------------------------------------------------------------         
+         
 label_1809
       ldy $0e
 
@@ -2699,7 +2744,7 @@ label_183e
       beq label_1859
       lda #$00
       sta $a8, x
-   lda $4500, x
+   lda entity_status_byte, x
       and #$40
       bne label_1859
    jsr label_1879
@@ -2725,67 +2770,70 @@ label_186b
 label_1876
    jmp label_0d0b
 
+; ----------------------------------------------------------------
 label_1879
-   lda port_2_joystick, x
-      sta $4d
-      stx $05
-      and #$0f
-         sec
-      sbc #$05
-         tay
-   lda $1eeb, y
-      sta $04
-      bmi label_189c
-   lda $5100, x
-      cmp $04
-      bne label_18a1
-   lda $4500, x
-      bpl label_18d9
+   lda port_2_joystick, x ; If x is 1 actually reads port 1 joystick
+   sta $4d
+   stx processing_entity_number
+   and #$0f               ; Mask off lower 4 bits, which are movement.
+   sec
+   sbc #$05               ; Values 0-4 are invalid as joystick input.
+   tay
+   lda joystick_offset_table, y
+   sta last_facing_for_joystick_position
+   bmi .joystick_idle     ; Invalid/idle joystick positions get $80 
+                          ; from the table, which has MSB set and so 
+                          ; is considered negative and triggers BMI.
+   lda entity_facing, x
+   cmp last_facing_for_joystick_position
+   bne .player_needs_turn
+   lda entity_status_byte, x
+   bpl label_18d9
 
 label_1899
    jmp label_1d68
 
-label_189c
-      ldx $05
+.joystick_idle
+   ldx processing_entity_number
    jmp label_1269
 
-label_18a1
-   lda $5100, x
-         tay
-      sta $06
-   lda $4500, x
-      bmi label_18c4
-      ldy $04
-   jsr label_1961
-   jsr label_1dd2
-      ldx $05
-      cmp #$20
-      beq label_18d1
-      cmp #$3f
-      bcs label_18d1
-      lda $06
-      sta $04
-      bcc label_18d9
+.player_needs_turn
+   lda entity_facing, x
+   tay
+   sta $06
+   lda entity_status_byte, x
+   bmi label_18c4
+   ldy last_facing_for_joystick_position
+   jsr propose_direction_y_move_coords_for_entity_x
+   jsr call_0fae_with_xy_equal_proposed_coords
+   ldx processing_entity_number
+   cmp #$20
+   beq label_18d1
+   cmp #$3f             ; Sets carry if a >= $3f..
+   bcs label_18d1
+   lda $06
+   sta last_facing_for_joystick_position
+   bcc label_18d9
 
 label_18c4
    lda $1f0f, y
-      cmp $04
-      bne label_1899
-   jsr label_195e
-   jsr label_1ace
+   cmp last_facing_for_joystick_position
+   bne label_1899
+   jsr propose_forward_moove_coords_for_entity_x
+   jsr copy_proposed_coords_to_actual_coords_entity_x
 
 label_18d1
-      lda $04
-   sta $5100, x
-   jmp label_189c
+   lda last_facing_for_joystick_position
+   sta entity_facing, x
+   jmp .joystick_idle
 
 label_18d9
-   jsr label_1dcf
+   jsr call_0fae_with_forward_coords_for_entity_x
          pha
    jsr label_0fce
       and #$0f
       sta $42
-      ldx $05
+      ldx processing_entity_number
          pla
       cmp #$20
       beq label_1959
@@ -2801,9 +2849,9 @@ label_18d9
       beq label_1953
       cpy #$0c
       bcs label_190f
-   lda $5100, y
+   lda entity_facing, y
       ldx $3a
-   cmp $5100, x
+   cmp entity_facing, x
       beq label_1953
 
 label_190f
@@ -2851,27 +2899,29 @@ label_1947
 !byte $D0,$06
 
 label_1953
-   jsr label_1d90
-   jmp label_189c
+   jsr flip_bit_3_on_status_of_entity_x
+   jmp .joystick_idle
 
 label_1959
-   ldx $05
+   ldx processing_entity_number
    jmp label_1d7b
 
-label_195e
-   ldy $5100, x
+; ---------------------------------------------------------------------   
+   
+propose_forward_moove_coords_for_entity_x
+   ldy entity_facing, x
 
-label_1961
+propose_direction_y_move_coords_for_entity_x
    lda entity_x_coords, x
    clc
-   adc $1ee3, y
+   adc facing_offset_table_horz, y
    jsr wraparound_x_coordinate_a
-   sta $07
+   sta proposed_entity_x_coord
    lda entity_y_coords, x
    clc
-   adc $1ee7, y
+   adc facing_offset_table_vert, y
    jsr wraparound_y_coordinate_a
-   sta $08
+   sta proposed_entity_y_coord
    rts
 
 ; -----------------------------------------------------------------
@@ -2920,12 +2970,12 @@ wraparound_y_coordinate_a
 !zone flip_top_bit_and_clear_third_bit_of_4500
   
 flip_top_bit_and_clear_third_bit_of_4500
-   lda $4500, x
+   lda entity_status_byte, x
    eor #$80
-   sta $4500, x
-   lda $4500, x
+   sta entity_status_byte, x
+   lda entity_status_byte, x
    and #$fb
-   sta $4500, x
+   sta entity_status_byte, x
    rts
 
 ; -----------------------------------------------------------------         
@@ -2941,7 +2991,7 @@ label_19a8
   lda level_units_c
   lsr
   sta $3f
-  stx $05
+  stx processing_entity_number
   lda p1_lives, x
   beq .player_dead_dead
   lda #$10
@@ -2955,17 +3005,17 @@ label_19a8
   ora #$20
   sta $4400, x
   lda $1f07, x
-      sta $07
+      sta proposed_entity_x_coord
       lda #$17
-      sta $08
-   jsr label_1ace
+      sta proposed_entity_y_coord
+   jsr copy_proposed_coords_to_actual_coords_entity_x
    lda $1f13, x
-   sta $5100, x
+   sta entity_facing, x
       lda #$00
    jsr label_12fb
-      ldx $05
-   jsr label_1dd2
-      ldx $05
+      ldx processing_entity_number
+   jsr call_0fae_with_xy_equal_proposed_coords
+      ldx processing_entity_number
       cmp #$20
       beq label_1a08
       cmp #$3f
@@ -2983,7 +3033,7 @@ label_19f6
    jsr label_1cef
 
 label_1a08
-      ldy $05
+      ldy processing_entity_number
    jsr label_122a
 
 .player_dead_dead
@@ -2992,7 +3042,7 @@ label_1a08
 ; ------------------------------------------------------------------
    
 label_1a10
-      stx $05
+      stx processing_entity_number
    lda $4800, x
       sta $fd
       sta $02
@@ -3009,30 +3059,30 @@ label_1a1d
          dey
       bpl label_1a1d
       sta $42
-      ldx $05
+      ldx processing_entity_number
    ldy $4100, x
    lda $4083, y
       bpl label_1a3e
       inc $42
 
 label_1a3e
-      ldx $05
+      ldx processing_entity_number
    lda entity_x_coords, x
-      sta $03
+      sta temp_entity_x_coord
    lda entity_y_coords, x
       sta $fb
 
 label_1a4a
       ldy $fc
-      lda $03
+      lda temp_entity_x_coord
          clc
-   adc $1ee3, y
+   adc facing_offset_table_horz, y
    jsr wraparound_x_coordinate_a
          tax
-      sta $03
+      sta temp_entity_x_coord
       lda $fb
          clc
-   adc $1ee7, y
+   adc facing_offset_table_vert, y
    jsr wraparound_y_coordinate_a
          tay
       sta $fb
@@ -3050,7 +3100,7 @@ label_1a4a
 label_1a7c
       cmp #$40
       bcc label_1a8c
-      ldx $03
+      ldx temp_entity_x_coord
    jsr label_0fed
       inc $42
       ldx $fc
@@ -3064,7 +3114,7 @@ label_1a8c
    jmp label_1a3e
 
 label_1a97
-      ldx $05
+      ldx processing_entity_number
       lda $42
       beq label_1aa1
       lda #$20
@@ -3099,12 +3149,16 @@ label_1ac6
    jsr $ffd2
    jmp label_0b30
 
-label_1ace
-      lda $07
+; ---------------------------------------------------------------   
+   
+copy_proposed_coords_to_actual_coords_entity_x
+   lda proposed_entity_x_coord
    sta entity_x_coords, x
-      lda $08
+   lda proposed_entity_y_coord
    sta entity_y_coords, x
-         rts
+   rts
+   
+; ---------------------------------------------------------------
 
 label_1ad9
       ldx #$02
@@ -3114,7 +3168,7 @@ label_1ad9
 label_1adf
    lda entity_shields, x
       beq label_1af4
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_1aef
    jsr label_1d68
    jmp label_1af2
@@ -3133,11 +3187,11 @@ label_1af4
 
 label_1afa
       stx $09
-   jsr label_195e
+   jsr propose_forward_moove_coords_for_entity_x
 
 label_1aff
-      ldx $07
-      ldy $08
+      ldx proposed_entity_x_coord
+      ldy proposed_entity_y_coord
       bne label_1b0e
 
 label_1b05
@@ -3170,11 +3224,11 @@ label_1b25
       ldy $3a
    lda $00be, y
    sta player_var_ub, y
-   lda $5100, y
+   lda entity_facing, y
 
 label_1b35
       sta $fe
-      sty $05
+      sty processing_entity_number
       ldx #$02
 
 label_1b3b
@@ -3198,15 +3252,15 @@ label_1b55
 
 label_1b59
       lda $fe
-      ldy $05
+      ldy processing_entity_number
       stx $8d
 
 label_1b5f
-   sta $5100, x
+   sta entity_facing, x
    lda $4b00, y
          pha
    lda $4300, y
-      stx $05
+      stx processing_entity_number
       sty $fd
    jsr label_1447
          pla
@@ -3225,35 +3279,35 @@ label_1b88
       and #$f0
    ora $4400, y
    sta $4400, x
-   lda $4500, y
+   lda entity_status_byte, y
       and #$40
       beq label_1b9f
       lda #$20
    sta entity_shields, x
 
 label_1b9f
-   ldy $5100, x
+   ldy entity_facing, x
       ldx $fd
-   jsr label_1961
-      ldx $05
-   jsr label_1ace
+   jsr propose_direction_y_move_coords_for_entity_x
+      ldx processing_entity_number
+   jsr copy_proposed_coords_to_actual_coords_entity_x
       ldx $fd
-   lda $4500, x
+   lda entity_status_byte, x
       bpl label_1bbb
-      ldx $05
-   jsr label_195e
-   jsr label_1ace
+      ldx processing_entity_number
+   jsr propose_forward_moove_coords_for_entity_x
+   jsr copy_proposed_coords_to_actual_coords_entity_x
 
 label_1bbb
       lda $fd
       cmp #$02
       bcs label_1bc6
-      ldx $05
+      ldx processing_entity_number
    sta $4300, x
 
 label_1bc6
-   jsr label_1dd2
-      ldx $05
+   jsr call_0fae_with_xy_equal_proposed_coords
+      ldx processing_entity_number
       cmp #$20
       beq label_1beb
       cmp #$40
@@ -3291,20 +3345,20 @@ label_1bfb
       cmp #$12
       bne label_1c33
       ldx $09
-   lda $4500, x
+   lda entity_status_byte, x
       and #$20
       beq label_1c33
    lda entity_shields, x
       cmp #$14
       bcs label_1c33
-   lda $5100, y
+   lda entity_facing, y
          tay
-   lda $5100, x
+   lda entity_facing, x
    cmp $1f0f, y
       beq label_1c33
-   ldy $5100, x
+   ldy entity_facing, x
    lda $1f0f, y
-   sta $5100, x
+   sta entity_facing, x
       lda #$01
       ldx $09
    ldy $4300, x
@@ -3317,7 +3371,7 @@ label_1c33
    jsr label_12fb
       ldy #$03
       ldx $09
-   lda $4500, x
+   lda entity_status_byte, x
       and #$20
       beq label_1c4c
    dec entity_shields, x
@@ -3339,7 +3393,7 @@ label_1c67
       lda #$00
    sta entity_shields, x
       beq label_1c7c
-   lda $4500, x
+   lda entity_status_byte, x
       and #$20
       beq label_1c7c
       lda #$01
@@ -3489,35 +3543,39 @@ label_1d68
       stx $13
    jsr label_14a4
       ldx $13
-   jsr label_195e
-   jsr label_1ace
+   jsr propose_forward_moove_coords_for_entity_x
+   jsr copy_proposed_coords_to_actual_coords_entity_x
    jsr flip_top_bit_and_clear_third_bit_of_4500
    jmp label_1269
 
 label_1d7b
       stx $13
-   lda $4500, x
+   lda entity_status_byte, x
       and #$fb
-   sta $4500, x
+   sta entity_status_byte, x
    jsr flip_top_bit_and_clear_third_bit_of_4500
    jsr label_1269
       ldx $13
    jmp label_126e
 
-label_1d90
-   lda $4500, x
-      eor #$04
-   sta $4500, x
-         rts
+; ---------------------------------------------------------------   
+   
+flip_bit_3_on_status_of_entity_x
+   lda entity_status_byte, x
+   eor #$04
+   sta entity_status_byte, x
+   rts
 
+; --------------------------------------------------------------------         
+         
 label_1d99
       ldx #$07
 
 label_1d9b
    lda $1ffe, x
-      beq label_1da8
+   beq label_1da8
    sta $05c7, x
-      lda #$0a
+   lda #$0a
    sta $d9c7, x
 
 label_1da8
@@ -3542,13 +3600,17 @@ label_1db0
    bit $01a9
    jmp label_0fc5
 
-label_1dcf
-   jsr label_195e
+; --------------------------------------------------------------------   
+   
+call_0fae_with_forward_coords_for_entity_x
+   jsr propose_forward_moove_coords_for_entity_x
 
-label_1dd2
-      ldx $07
-      ldy $08
+call_0fae_with_xy_equal_proposed_coords
+   ldx proposed_entity_x_coord
+   ldy proposed_entity_y_coord
    jmp label_0fae
+   
+; ---------------------------------------------------------------------   
 
 load_3_2_6_to_14_aa_be_with_x_offset
       lda #$03
@@ -3584,9 +3646,35 @@ msg_banner
 !byte $32,$20,$96,$53,$20,$9E,$4C,$00
 !byte $00,$00,$37,$6E,$A5,$02,$04,$05
 !byte $06,$08,$09,$0B,$0E,$00,$00,$04
-!byte $FC,$04,$FC,$00,$00,$00,$00,$01
-!byte $FF,$01,$FF,$00,$00,$00,$01,$02
-!byte $80,$00,$01,$03,$80,$00,$01,$80
+!byte $FC,$04,$FC,$00,$00
+
+; Table indexed into by entity facing 
+facing_offset_table_horz:
+!byte $00,$00,$01,$FF
+
+
+facing_offset_table_vert:
+!byte $01,$FF,$00,$00
+
+; Used in routines above to look up facing value from joystick bitmap.
+; Note that 5 is subtracted before the value is used as the index 
+; because joystick values 0-4 are all impossible.
+joystick_offset_table:
+!byte $00       ; %0101, down+right
+!byte $01       ; %0110, up+right          
+!byte $02       ; %0111, right
+!byte $80       ; %1000, impossible (up+down+left)
+!byte $00       ; %1001, left+down
+!byte $01       ; %1010, left+up 
+!byte $03       ; %1011, left 
+!byte $80       ; %1100, impossible (up+down)
+!byte $00       ; %1101, down
+!byte $01       ; %1110, up
+!byte $80       ; %1111, idle
+
+
+
+; This array is indexed into by startup loop.
 !byte $80,$40,$20,$10,$08,$04,$02,$01
 !byte $02,$04,$08,$10,$20,$40,$80,$04
 !byte $05,$01,$25,$C0,$DB,$08,$0C,$00
@@ -3594,6 +3682,8 @@ msg_banner
 !byte $08,$10,$02,$05,$19,$03,$02,$1A
 !byte $FF,$01
 
+spar_images:
+  
 !byte %........
 !byte %..##....
 !byte %...#..#.
