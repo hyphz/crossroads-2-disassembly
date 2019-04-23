@@ -1,71 +1,74 @@
 * = $0801
-sid_voice3_low_freq = $d40e
-sid_voice3_high_freq = $d40f
-sid_voice3_control = $d412
+
+c_empty_space = $20
+
+
+
+; HARDWARE ADDRESSES
+jiffy_clock              = $a2
+stack                    = $0100
+screen                   = $0400
+sid_voice3_low_freq      = $d40e
+sid_voice3_high_freq     = $d40f
+sid_voice3_control       = $d412
+sid_volume_filter        = $d418
 sid_voice3_oscillator_ro = $d41b
+colors                   = $d800
+port_2_joystick          = $dc00
+port_1_joystick          = $dc01
+
+; OS ROUTINE
 output_string_at_yyaa_until_zero_or_quote = $ab1e
-port_2_joystick = $dc00
-port_1_joystick = $dc01
-explosion_status = $4028
+
+
+sound_buffer          = $1f46
+
+explosion_array_a     = $4020
+explosion_status      = $4028
+explosion_array_b     = $4048
+sound_buffer_offset   = $4060
+entity_status_byte    = $4500
+entity_shields        = $4600
+p2_shields            = $4601
+entity_x_coords       = $4e00
+entity_y_coords       = $4f00
+entity_facing         = $5100
+
+screen_line_address_lowbytes = $6000
+screen_line_address_highbytes = $6019
 player_1_score_digits = $6040
 player_2_score_digits = $6048
-high_score_digits = $6050
-entity_shields = $4600
-p2_shields = $4601
-p1_lives = $11
-p2_lives = $12
-level_tens = $b0
-level_units_a = $b1
-level_units_b = $47
-level_units_c = $4b
-var_c = $4c
-var_d = $41
-var_e = $6c
-var_f_init_12 = $0d
-var_g_init_11 = $39
-level_x4_p70 = $d7
+high_score_digits     = $6050
 
-p1_shields_copy = $14
-p2_shields_copy = $15
-
-var_a_init_zero = $c9
-var_b_init_zero = $6b
-
-
-jiffy_clock = $a2
-colors = $d800
-
-
-player_var_ua = $49
-player_var_ub = $4e
-
-entity_status_byte = $4500
-
-
-entity_x_coords = $4e00
-entity_y_coords = $4f00
-
-entity_facing = $5100
-
-found_empty_entity_number = $48
-
-screen = $0400
-stack = $0100
-
-
-proposed_entity_x_coord = $07
-proposed_entity_y_coord = $08
-
+temp_entity_x_coord               = $03
 last_facing_for_joystick_position = $04
-
-processing_entity_number = $05
-temp_entity_x_coord = $03
-
-
+processing_entity_number          = $05
+proposed_entity_x_coord           = $07
+proposed_entity_y_coord           = $08
+entity_number_that_hit_player     = $09
+var_f_init_12                     = $0d
+p1_lives                          = $11
+p2_lives                          = $12
+p1_shields_copy                   = $14
+p2_shields_copy                   = $15
+var_g_init_11                     = $39
+var_d                             = $41
+interrupt_counter                 = $46
+level_units_b                     = $47
+found_empty_entity_number         = $48
+player_var_ua                     = $49
+level_units_c                     = $4b
+var_c                             = $4c
+player_var_ub                     = $4e
+var_b_init_zero                   = $6b
+var_e                             = $6c
+level_tens                        = $b0
+level_units_a                     = $b1
+var_a_init_zero                   = $c9
+level_x4_p70                      = $d7
 
 ;to "xroads2.d64", d64
 !to "xroads2.prg", cbm
-
 
 
 !byte %....#.##
@@ -82,7 +85,7 @@ temp_entity_x_coord = $03
 !byte %........
 
 
-!zone mobile_graphics
+!zone character_graphics
   
 first_frames:
 
@@ -448,6 +451,8 @@ second_frames:
 !byte %........
 !byte %........
 
+walls:
+
 !byte %##.##.##
 !byte %##....##
 !byte %..####..
@@ -767,35 +772,37 @@ label_0ab7
  sta high_score_digits, x
  dex
  bpl .clear_explosions_and_highscore
+ 
  sta $66
  sta $67
  ldx #$04
  tay
- sta $4060
- stx $52
+ sta sound_buffer_offset
+ stx $52             
 
-label_0b0e
-   sta $6000, y
-   pha
-   txa
-   sta $6019, y
-   iny
-   cpy #$19
-   beq label_0b24
-   pla
-   clc
-   adc #$28
-       bcc label_0b0e
-          inx
-       bcs label_0b0e
+ 
+generate_multiples_array
+ sta screen_line_address_lowbytes, y          ; a=0
+ pha                   ; pushed a
+ txa                   ; 4
+ sta screen_line_address_highbytes, y          
+ iny              
+ cpy #$19              ; generate 25 total values
+ beq label_0b24
+ pla                   ; pulled a (0)
+ clc
+ adc #$28              ; adding 40 
+ bcc generate_multiples_array
+ inx
+ bcs generate_multiples_array
 
 label_0b24
-         sei
-       lda #$15
-    sta $0314
-       lda #$10
-    sta $0315
-         cli
+ sei  ;disable interrupts
+ lda #<interrupt_service_routine   ; load address of our ISR
+ sta $0314
+ lda #>interrupt_service_routine
+ sta $0315
+ cli ;and restart interrupts
 
 label_0b30
    jsr clear_explosions
@@ -803,7 +810,7 @@ label_0b30
        stx var_f_init_12
       stx found_empty_entity_number
       stx $52
-    sta $4060
+    sta sound_buffer_offset
 
 label_0b3e
   sta player_1_score_digits, x
@@ -1039,11 +1046,11 @@ label_0ca8
       sta $fe
 
 label_0cac
-   jsr label_12d2
+   jsr set_xy_to_random_empty_space_coord
       lda #$3f
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
       lda #$01
-   jsr label_0fc5
+   jsr write_a_to_screen_position_xy_plus_212
       dec $fe
       bne label_0cac
       lda #$f9
@@ -1053,9 +1060,9 @@ label_0cc1
       ldy $cb
       cpy #$06
       bne label_0cdc
-   lda $4060
+   lda sound_buffer_offset
       eor #$01
-   sta $4060
+   sta sound_buffer_offset
 
 label_0ccf
   lda jiffy_clock      
@@ -1069,7 +1076,7 @@ label_0ccf
   bne .wait_16jiffies_loop
 
 label_0cdc
-   lda $4060
+   lda sound_buffer_offset
    beq label_0d01
    lda jiffy_clock
    and #$01
@@ -1087,7 +1094,7 @@ label_0cdc
    jmp label_0ccf
 
 label_0d01
-      lda $46
+      lda interrupt_counter
       beq label_0d0b
    jsr label_1ad9
    jmp label_183a
@@ -1129,9 +1136,9 @@ label_0d33
       cmp #$05
       bcs label_0d55
       inc var_b_init_zero
-   jsr label_12d2
+   jsr set_xy_to_random_empty_space_coord
       lda #$3f
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
    jsr label_1db0
 
 label_0d55
@@ -1373,7 +1380,7 @@ inc_and_clear_smb_64bytes
    lda self_mod_sta_base_address_lo    ; Get current address low byte.
    clc                                 ; Add 64.
    adc #$40
-   bcc .adding_64_no_carry                      ; Did it trigger carry?
+   bcc .adding_64_no_carry             ; Did it trigger carry?
    inc self_mod_sta_base_address_hi    ; If so, increment address high byte.
 
 .adding_64_no_carry
@@ -1465,17 +1472,17 @@ label_0efe
       bit $20a9
       sta $06
       ldx $fd
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
       lda $c3
-   jsr label_0fc5
+   jsr write_a_to_screen_position_xy_plus_212
       lda #$26
          sec
       sbc $fd
          tax
       lda $06
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
       lda $c3
-   jsr label_0fc5
+   jsr write_a_to_screen_position_xy_plus_212
       inc $03
       inc $fd
       lda $03
@@ -1556,49 +1563,58 @@ update_status_bar_just_shields:
 
 ; ----------------------------------------------------------------------
    
-label_0fa5
-   sta $0c
-   lda #$9d
-   sta $0fc1
-   bne label_0fb3
+; SELF MODIFYING CODE ALERT
 
-label_0fae
-   lda #$bd
-   sta $0fc1         ; 
+.temp_acc_store = $0c
 
-label_0fb3
-   lda $6000, y
-   sta $0fc2            
-   lda $6019, y
-   sta $0fc3
-   lda $0c           ; ??
-   lda $0400, x
+write_a_to_screen_position_xy
+   sta .temp_acc_store
+   lda #$9d        ; STA absolute, x
+   sta .selfmod_instruction
+   bne .calculate_screen_address
+
+read_a_from_screen_position_xy
+   lda #$bd        ; LDA absolute, x
+   sta .selfmod_instruction
+
+.calculate_screen_address
+   lda screen_line_address_lowbytes, y
+   sta .selfmod_instruction+1            
+   lda screen_line_address_highbytes, y
+   sta .selfmod_instruction+2
+   lda .temp_acc_store        ; ??
+
+.selfmod_instruction:
+   lda $0400, x         ; This instruction is always changed above
    rts
 
 ; ----------------------------------------------------------------------         
          
-label_0fc5
-      sta $0c
-      lda #$9d
-   sta $0fe4
-      bne label_0fd3
+write_a_to_screen_position_xy_plus_212
+   sta $0c
+   lda #$9d             ; STA absolute, x
+   sta .selfmod_instruction2
+   bne label_0fd3
 
-label_0fce
-      lda #$bd
-   sta $0fe4
+read_a_from_screen_position_xy_plus_212
+   lda #$bd             ; LDA absolute, x
+   sta .selfmod_instruction2
 
 label_0fd3
-   lda $6000, y
-   sta $0fe5
-   lda $6019, y
-         clc
-      adc #$d4
-   sta $0fe6
+   lda screen_line_address_lowbytes, y
+   sta .selfmod_instruction2+1
+   lda screen_line_address_highbytes, y
+   clc
+   adc #$d4
+   sta .selfmod_instruction2+2
 
 label_0fe2
-      lda $0c
+   lda $0c
+.selfmod_instruction2:
    lda $0400, x
-         rts
+   rts
+   
+; ---------------------------------------------------------------------
          
 
 label_0fe8
@@ -1606,9 +1622,9 @@ label_0fe8
       lda #$9d
    bit $bda9
    sta $0fe4
-   lda $6000, y
+   lda screen_line_address_lowbytes, y
    sta $0fe5
-   lda $6019, y
+   lda screen_line_address_highbytes, y
          clc
       adc #$bc
    sta $0fe6
@@ -1616,59 +1632,214 @@ label_0fe8
 
 ; -----------------------------------------------------------------   
    
-clear_explosions
+!zone clear_explosions
+  
+clear_explosions:
   ldx #$07
   lda #$00
 
 .explosion_clear_loop
-   sta explosion_status, x
-   sta $d000, x           ; Covers sprite coordinates 0-3
-   sta $d008, x           ; Covers sprite coordinates 4-7
-   dex
-   bpl .explosion_clear_loop
-   rts
+  sta explosion_status, x
+  sta $d000, x           ; Covers sprite coordinates 0-3
+  sta $d008, x           ; Covers sprite coordinates 4-7
+  dex
+  bpl .explosion_clear_loop
+  rts
     
 ; ---------------------------------------------------------------------         
          
-!byte $E6,$46,$AE,$60,$40,$BD,$46,$1F
-!byte $8D,$18,$D4,$F0,$06,$A5,$A2,$29
-!byte $01,$D0,$03,$4C,$31,$EA,$A2,$01
-!byte $86,$6A,$B5,$4E,$F0,$02,$D6,$4E
-!byte $D6,$49,$D0,$08,$B5,$AA,$95,$49
-!byte $A9,$01,$95,$A8,$B5,$66,$F0,$53
-!byte $BC,$38,$1F,$C9,$05,$90,$1B,$D0
-!byte $06,$B5,$68,$A2,$21,$D0,$26,$C9
-!byte $07,$F0,$06,$B5,$68,$A2,$81,$D0
-!byte $1C,$B5,$68,$18,$69,$F6,$A2,$81
-!byte $D0,$13,$AA,$AD,$1B,$D4,$3D,$41
-!byte $1F,$18,$7D,$3D,$1F,$85,$8F,$BD
-!byte $39,$1F,$AA,$A5,$8F,$99,$01,$D4
-!byte $A9,$09,$99,$05,$D4,$A9,$00,$99
-!byte $04,$D4,$8A,$99,$04,$D4,$A6,$6A
-!byte $D6,$68,$D0,$07,$A9,$00,$95,$66
-!byte $99,$04,$D4,$CA,$C6,$6A,$10,$92
-!byte $C6,$40,$D0,$1F,$A9,$03,$85,$40
-!byte $A5,$3F,$38,$E5,$3C,$F0,$10,$B0
-!byte $08,$C6,$41,$D0,$0A,$E6,$41,$D0
-!byte $06,$E6,$41,$D0,$02,$C6,$41,$A9
-!byte $00,$85,$3C,$C6,$52,$D0,$1C,$A9
-!byte $02,$85,$52,$A6,$CA,$CA,$10,$02
-!byte $A2,$02,$86,$CA,$BC,$15,$1F,$A2
-!byte $07,$B9,$20,$1F,$9D,$F8,$29,$C8
-!byte $CA,$10,$F6,$A2,$07,$BD,$28,$40
-!byte $F0,$5C,$BC,$20,$40,$BD,$48,$40
-!byte $18,$79,$1E,$1F,$D9,$1C,$1F,$F0
-!byte $19,$9D,$48,$40,$38,$E9,$02,$D9
-!byte $1C,$1F,$D0,$38,$BC,$58,$40,$B9
-!byte $00,$45,$29,$BF,$99,$00,$45,$4C
-!byte $39,$11,$C0,$00,$F0,$19,$BD,$38
-!byte $40,$F0,$14,$BD,$30,$40,$18,$69
-!byte $01,$C9,$0F,$B0,$0A,$9D,$30,$40
-!byte $BD,$38,$40,$69,$F5,$D0,$14,$A9
-!byte $00,$9D,$28,$40,$8A,$0A,$A8,$A9
-!byte $00,$99,$01,$D0,$BD,$40,$40,$18
-!byte $7D,$48,$40,$9D,$F8,$07,$CA,$30
-!byte $03,$4C,$E2,$10,$4C,$31,$EA
+!zone interrupt_service_routine
+  
+interrupt_service_routine:
+  inc interrupt_counter
+  ldx sound_buffer_offset
+  lda sound_buffer, x
+  sta sid_volume_filter
+  beq label_102b
+  lda jiffy_clock 
+  and #01
+  bne label_102b
+  jmp $ea31      ; Jump to system ISR
+
+label_102b:
+  ldx #01
+  stx $6a
+  
+label_102f:
+  lda player_var_ub, x
+  beq label_1035
+  dec player_var_ub, x
+
+label_1035:
+  dec player_var_ua, x
+  bne label_1041
+  lda $aa, x
+  sta player_var_ua, x
+  lda #01
+  sta $a8, x
+  
+label_1041:
+  lda $66, x
+  beq label_1098
+  ldy $1f38, x
+  cmp #05
+  bcc label_1067
+  bne label_1054
+  lda $68, x
+  ldx #$21
+  bne label_107a
+
+label_1054:
+  cmp #07
+  beq label_105e
+  lda $68, x
+  ldx #$81
+  bne label_107a
+
+label_105e:
+  lda $68, x
+  clc
+  adc #$f6
+  ldx #$81
+  bne label_107a
+  
+ label_1067:
+  tax
+  lda $d41b
+  and $1f41, x
+  clc
+  adc $1f3d, x
+  sta $8f
+  lda $1f39, x
+  tax
+  lda $8f 
+  
+label_107a:
+  sta $d401, y
+  lda #$09
+  sta $d405, y
+  lda #$00
+  sta $d404, y
+  txa
+  sta $d404, y
+  ldx $6a
+  dec $68, x
+  bne label_1098
+  lda #00
+  sta $66, x
+  sta $d404, y
+
+label_1098:  
+  dex
+  dec $6a 
+  bpl label_102f
+  dec $40
+  bne label_10c0
+  
+  lda #$03
+  sta $40
+  lda $3f
+  sec
+  sbc $3c
+  beq label_10bc
+  bcs label_10b6
+  dec var_d
+  bne label_10bc
+label_10b6:
+  inc var_d
+  bne label_10bc
+  inc var_d
+  bne label_10bc
+  dec var_d
+
+label_10bc:
+  lda #00
+  sta $3c
+
+label_10c0:
+  dec $52
+  bne label_10e0
+  lda #02
+  sta $52
+  ldx $ca
+  dex
+  bpl label_10cf
+  ldx #$02
+label_10cf:
+  stx $ca
+  ldy $1f15, x
+  ldx #$07
+
+label_10d6:
+  lda $1f20, y
+  sta $29f8, x
+  iny
+  dex
+  bpl label_10d6
+
+  label_10e0:
+  ldx #$07
+  
+label_10e2:
+  lda explosion_status, x
+  beq label_1143
+  ldy explosion_array_a, x
+  lda explosion_array_b, x
+  clc
+  adc $1f1e, y
+  cmp $1f1c, y
+  beq label_110f
+  sta explosion_array_b, x
+  sec
+  sbc #$02
+  cmp $1f1c, y
+  bne label_1139
+  ldy $4058, x
+  lda $4500, y
+  and #$bf
+  sta $4500, y
+  jmp label_1139
+label_110f:
+
+  cpy #00
+  beq label_112c
+  lda $4038, x
+  beq label_112c
+  lda $4030, x
+  clc
+  adc #01
+  cmp #$0f
+  bcs label_112c
+  sta $4030, x
+  lda $4038, x
+  adc #$f5
+  bne label_1140
+  
+label_112c:  
+  lda #$00
+  sta explosion_status, x
+  txa
+  asl
+  tay
+  lda #$00
+  sta $d001, y
+ label_1139: 
+  lda $4040, x
+  clc
+  adc explosion_array_b, x
+  
+label_1140:
+  sta $07f8, x
+label_1143:
+  dex
+  bmi label_1149
+  jmp label_10e2
+
+label_1149:
+  jmp $ea31    ; System interrupt service routine
+  
+; ----------------------------------------------------------------------
+  
 
 label_114c
       lda #$00
@@ -1750,7 +1921,7 @@ label_11bd
 
 label_11dc
       stx $44
-   jsr label_12d2
+   jsr set_xy_to_random_empty_space_coord
       lda $44
    jsr label_13fa
       ldx $a3
@@ -1784,9 +1955,9 @@ label_1219
    lda entity_x_coords, x
    tax
    lda #$00
-   jsr label_0fc5
+   jsr write_a_to_screen_position_xy_plus_212
    lda #$00
-   jmp label_0fa5
+   jmp write_a_to_screen_position_xy
 
 ; --------------------------------------------------------------------   
    
@@ -1875,12 +2046,12 @@ label_129c
 
 label_12aa
    jsr propose_forward_moove_coords_for_entity_x
-      ldx proposed_entity_x_coord
-      ldy proposed_entity_y_coord
+   ldx proposed_entity_x_coord
+   ldy proposed_entity_y_coord
    jsr label_12c3
 
 label_12b4
-         rts
+   rts
 
 label_12b5
    lda entity_y_coords, x
@@ -1892,33 +2063,33 @@ label_12b5
 
 label_12c3
    lda $fc
-   jsr label_0fc5
+   jsr write_a_to_screen_position_xy_plus_212
    lda $fb
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
    lda $8d
    jmp label_0fe8
 
-label_12d2
+set_xy_to_random_empty_space_coord
    lda sid_voice3_oscillator_ro
-      and #$1f
-      sta $fc
+   and #$1f        ;  random value 0-31.. 
+   sta $fc
    lda sid_voice3_oscillator_ro
-      and #$07
-         clc
-      adc $fc
-         tax
+   and #$07        ; add random value 0-7, to make 0-38.
+   clc
+   adc $fc
+   tax             ; store in x
    lda sid_voice3_oscillator_ro
-      and #$0f
-      adc #$02
-      sta $fc
+   and #$0f        ; random value 0-15
+   adc #$02        ; add 2 for 2 rows of status bar..
+   sta $fc
    lda sid_voice3_oscillator_ro
-      and #$07
-      adc $fc
-         tay
-   jsr label_0fae
-      cmp #$20
-      bne label_12d2
-         rts
+   and #$07        ; add random value 0-7 to make 2-24
+   adc $fc
+   tay             
+   jsr read_a_from_screen_position_xy ; get value at that position
+   cmp #$20        ; is it blank?
+   bne set_xy_to_random_empty_space_coord  ; if not, try again
+   rts
 
 label_12fb
       sta $fc
@@ -1936,7 +2107,7 @@ label_130a
 label_130d
    lda explosion_status, x
       beq label_133b
-   lda $4020, x
+   lda explosion_array_a, x
       bne label_1328
       dec $8e
       bpl label_1328
@@ -1964,16 +2135,16 @@ label_132b
 
 label_1334
       stx var_a_init_zero
-   lda $4020, x
+   lda explosion_array_a, x
       beq label_132b
 
 label_133b
       lda #$00
    sta $4030, x
       lda $fc
-   sta $4020, x
+   sta explosion_array_a, x
       beq label_1359
-      ldy $09
+      ldy entity_number_that_hit_player
       cpy #$0c
       bcs label_1359
       ldy $0a
@@ -1992,7 +2163,7 @@ label_1361
    sta $4038, x
       ldy $fc
    lda $1f1a, y
-   sta $4048, x
+   sta explosion_array_b, x
    lda sid_voice3_oscillator_ro
       and #$01
          tay
@@ -2033,7 +2204,7 @@ label_13b0
    ora $d010
 
 label_13b6
-   sta $d010
+   sta $d010              
    lda entity_x_coords, y
    asl
    asl
@@ -2344,7 +2515,7 @@ label_158f
 
 label_1594
       stx $13
-   jsr call_0fae_with_forward_coords_for_entity_x
+   jsr load_a_with_screen_at_entity_x_forward_coords
       ldx $13
       cmp #$20
       bne label_15a2
@@ -2619,7 +2790,7 @@ label_1775
       bne label_1794
    lda $40ae, y
       sta $0a
-      stx $09
+      stx entity_number_that_hit_player
    jsr label_1bfb
       ldx var_f_init_12
    lda entity_shields, x
@@ -2805,7 +2976,7 @@ label_1899
    bmi label_18c4
    ldy last_facing_for_joystick_position
    jsr propose_direction_y_move_coords_for_entity_x
-   jsr call_0fae_with_xy_equal_proposed_coords
+   jsr load_a_with_screen_at_proposed_coords
    ldx processing_entity_number
    cmp #$20
    beq label_18d1
@@ -2828,9 +2999,9 @@ label_18d1
    jmp .joystick_idle
 
 label_18d9
-   jsr call_0fae_with_forward_coords_for_entity_x
+   jsr load_a_with_screen_at_entity_x_forward_coords
          pha
-   jsr label_0fce
+   jsr read_a_from_screen_position_xy_plus_212
       and #$0f
       sta $42
       ldx processing_entity_number
@@ -2859,7 +3030,7 @@ label_190f
       ldy $0a
    lda entity_shields, y
       bne label_191e
-      ldx $09
+      ldx entity_number_that_hit_player
    jmp label_14b8
 
 label_191e
@@ -3014,7 +3185,7 @@ label_19a8
       lda #$00
    jsr label_12fb
       ldx processing_entity_number
-   jsr call_0fae_with_xy_equal_proposed_coords
+   jsr load_a_with_screen_at_proposed_coords
       ldx processing_entity_number
       cmp #$20
       beq label_1a08
@@ -3086,7 +3257,7 @@ label_1a4a
    jsr wraparound_y_coordinate_a
          tay
       sta $fb
-   jsr label_0fae
+   jsr read_a_from_screen_position_xy
       ldx $fc
    sta $4061, x
    inc $4065, x
@@ -3163,7 +3334,7 @@ copy_proposed_coords_to_actual_coords_entity_x
 label_1ad9
       ldx #$02
       lda #$00
-      sta $46
+      sta interrupt_counter
 
 label_1adf
    lda entity_shields, x
@@ -3184,9 +3355,11 @@ label_1af4
       cpx #$0c
       bne label_1adf
          rts
+         
+; -------------------------------------------------------------------
 
 label_1afa
-      stx $09
+      stx entity_number_that_hit_player
    jsr propose_forward_moove_coords_for_entity_x
 
 label_1aff
@@ -3195,7 +3368,7 @@ label_1aff
       bne label_1b0e
 
 label_1b05
-      stx $09
+      stx entity_number_that_hit_player
    ldy entity_y_coords, x
    lda entity_x_coords, x
          tax
@@ -3203,7 +3376,7 @@ label_1b05
 label_1b0e
    jsr label_0fed
          tay
-      ldx $09
+      ldx entity_number_that_hit_player
       sty $0a
 
 label_1b16
@@ -3306,24 +3479,24 @@ label_1bbb
    sta $4300, x
 
 label_1bc6
-   jsr call_0fae_with_xy_equal_proposed_coords
-      ldx processing_entity_number
-      cmp #$20
-      beq label_1beb
-      cmp #$40
-      bcs label_1bd9
-      lda #$00
+   jsr load_a_with_screen_at_proposed_coords
+   ldx processing_entity_number
+   cmp #$20       ; empty
+   beq label_1beb
+   cmp #$40       ; player
+   bcs label_1bd9
+   lda #$00       ; collided with something else, die      
    sta entity_shields, x
-         rts
+   rts
 
 label_1bd9
-      stx $09
+   stx entity_number_that_hit_player      
    jsr label_1aff
    jsr label_1bfb
-      ldx $0a
+   ldx $0a
    lda entity_shields, x
-      bmi label_1bea
-      bne label_1bf8
+   bmi label_1bea
+   bne label_1bf8
 
 label_1bea
          rts
@@ -3344,7 +3517,7 @@ label_1bfb
    lda $4300, y
       cmp #$12
       bne label_1c33
-      ldx $09
+      ldx entity_number_that_hit_player
    lda entity_status_byte, x
       and #$20
       beq label_1c33
@@ -3360,7 +3533,7 @@ label_1bfb
    lda $1f0f, y
    sta entity_facing, x
       lda #$01
-      ldx $09
+      ldx entity_number_that_hit_player
    ldy $4300, x
    jmp label_1239
 
@@ -3370,7 +3543,7 @@ label_1c33
       lda #$01
    jsr label_12fb
       ldy #$03
-      ldx $09
+      ldx entity_number_that_hit_player
    lda entity_status_byte, x
       and #$20
       beq label_1c4c
@@ -3415,15 +3588,15 @@ label_1c8d
    jsr label_1cef
 
 label_1c95
-      ldx $09
+      ldx entity_number_that_hit_player
    lda entity_shields, x
       bne label_1ca4
    jsr label_14a4
-      ldx $09
+      ldx entity_number_that_hit_player
    jsr label_1cef
 
 label_1ca4
-      ldx $09
+      ldx entity_number_that_hit_player
       cpx #$02
       bcs label_1cb7
    jsr update_status_bar_just_shields
@@ -3446,7 +3619,7 @@ label_1cb7
 
 label_1cc9
       ldy #$02
-      ldx $09
+      ldx entity_number_that_hit_player
       cpx #$0c
       bcs label_1cd2
          dey
@@ -3480,9 +3653,9 @@ label_1cef
 label_1cf9
       dec $fe
       bmi label_1cee
-   jsr label_12d2
+   jsr set_xy_to_random_empty_space_coord
       lda #$3f
-   jsr label_0fa5
+   jsr write_a_to_screen_position_xy
    jsr label_1db0
       bne label_1cf9
 
@@ -3598,17 +3771,17 @@ label_1db0
       lda #$02
    bit $06a9
    bit $01a9
-   jmp label_0fc5
+   jmp write_a_to_screen_position_xy_plus_212
 
 ; --------------------------------------------------------------------   
    
-call_0fae_with_forward_coords_for_entity_x
+load_a_with_screen_at_entity_x_forward_coords
    jsr propose_forward_moove_coords_for_entity_x
 
-call_0fae_with_xy_equal_proposed_coords
+load_a_with_screen_at_proposed_coords
    ldx proposed_entity_x_coord
    ldy proposed_entity_y_coord
-   jmp label_0fae
+   jmp read_a_from_screen_position_xy
    
 ; ---------------------------------------------------------------------   
 
