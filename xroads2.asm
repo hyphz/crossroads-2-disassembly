@@ -1,13 +1,38 @@
 * = $0801
 
-c_empty_space = $20
+c_empty = $20
+c_spar = $3f 
+c_player = $40
 
-
+ 
+ ; 1101 0000 1100 1101
+ ;           ---- 1101 = $d00c    ?
 
 ; HARDWARE ADDRESSES
+ram_rom_mapping          = $01
 jiffy_clock              = $a2
+pressed_key_code         = $cb
 stack                    = $0100
 screen                   = $0400
+vic_sprite_pointer_array = $07f8
+character_rom_base       = $d000  ; When mapped by ram_rom_mapping
+vic_sprite_coord_array   = $d000
+vic_sprite_x_hibits      = $d010 
+vic_sprite_enable        = $d015
+vic_screen_control_2     = $d016
+vic_sprite_double_height = $d017 
+vic_select_buffers       = $d018
+vic_sprite_color_array   = $d027
+vic_sprite_priority_bits = $d01b
+vic_sprite_double_width  = $d01d
+
+vic_border_color         = $d020
+vic_background_color     = $d021
+vic_extra_bg_col_3       = $d024
+sid_voice1_high_freq     = $d401
+sid_voice1_control       = $d404
+sid_voice1_att_dec       = $d405
+
 sid_voice3_low_freq      = $d40e
 sid_voice3_high_freq     = $d40f
 sid_voice3_control       = $d412
@@ -16,6 +41,7 @@ sid_voice3_oscillator_ro = $d41b
 colors                   = $d800
 port_2_joystick          = $dc00
 port_1_joystick          = $dc01
+cia_timer_control        = $dc0e
 
 ; OS ROUTINE
 output_string_at_yyaa_until_zero_or_quote = $ab1e
@@ -23,10 +49,17 @@ output_string_at_yyaa_until_zero_or_quote = $ab1e
 
 sound_buffer          = $1f46
 
-explosion_array_a     = $4020
+copy_of_character_rom = $2800
+udgs_base             = $2a00
+
+explosion_or_implosion     = $4020
 explosion_status      = $4028
-explosion_array_b     = $4048
-sound_buffer_offset   = $4060
+explosion_count_up_array = $4030
+explosion_base_sprite_pointer = $4040
+explosion_sprite_pointer_offset     = $4048
+exploding_entity_index= $4058
+game_status_flags   = $4060
+slot_udg_loaded_into  = $4096
 entity_status_byte    = $4500
 entity_shields        = $4600
 p2_shields            = $4601
@@ -53,6 +86,7 @@ p1_shields_copy                   = $14
 p2_shields_copy                   = $15
 var_g_init_11                     = $39
 var_d                             = $41
+udg_number_to_load                = $44
 interrupt_counter                 = $46
 level_units_b                     = $47
 found_empty_entity_number         = $48
@@ -60,10 +94,11 @@ player_var_ua                     = $49
 level_units_c                     = $4b
 var_c                             = $4c
 player_var_ub                     = $4e
-var_b_init_zero                   = $6b
+spars_spawned_by_0d33             = $6b
 var_e                             = $6c
 level_tens                        = $b0
 level_units_a                     = $b1
+udg_slot_to_load_to               = $b9
 var_a_init_zero                   = $c9
 level_x4_p70                      = $d7
 
@@ -698,33 +733,35 @@ label_0a67
 
 label_0a6e
  lda #$00
- sta $dc0e
+ sta cia_timer_control
  sta $6d
- lda #$73
- sta $01
+ lda #%01110011
+ sta ram_rom_mapping   ; Make character ROM visible at d000
  ldx #$ec
 
-label_0a7b
- lda $cfff, x
- sta $27ff, x
- lda $d0eb, x
+; Copy character shapes from ROM to $2800
+ 
+copy_character_rom
+ lda character_rom_base-1, x
+ sta copy_of_character_rom-1, x
+ lda $d0eb, x        ; VICII register image??
  sta $28eb, x
  dex
- bne label_0a7b
+ bne copy_character_rom
  ldx #$3f
 
 label_0a8c
- lda $094d, x
+ lda walls, x
  sta $2930, x
  dex
  bpl label_0a8c
- lda #$77
- sta $01
+ lda #%01110111
+ sta ram_rom_mapping   ; Make I/O visible at d000        
  lda #$01
- sta $dc0e
+ sta cia_timer_control
  lda #$1a
- sta $d018
- lda $d024
+ sta vic_select_buffers
+ lda vic_extra_bg_col_3
  cmp #$f6
  bne label_0aac
  inc $6d
@@ -754,15 +791,15 @@ label_0ab7
  cmp #$0a
  bcc label_0ab7
  lda #$cc
- sta $d016   ; Set 40 column screen width 
+ sta vic_screen_control_2   ; Set 40 column screen width 
  lda #$ff
- sta $d015   ; Enable all sprites
+ sta vic_sprite_enable   ; Enable all sprites
  lda #$00
- sta $d021   ; Background color
- sta $d020   ; Border color
- sta $d01b   ; Sprite priority register
- sta $d01d   ; Sprite double width
- sta $d017   ; Sprite double height
+ sta vic_background_color   ; Background color
+ sta vic_border_color   ; Border color
+ sta vic_sprite_priority_bits   ; Sprite priority register
+ sta vic_sprite_double_width   ; Sprite double width
+ sta vic_sprite_double_height   ; Sprite double height
  sta $d0cd   ; Register image??
  ldx #$07
 
@@ -777,7 +814,7 @@ label_0ab7
  sta $67
  ldx #$04
  tay
- sta sound_buffer_offset
+ sta game_status_flags
  stx $52             
 
  
@@ -810,7 +847,7 @@ label_0b30
        stx var_f_init_12
       stx found_empty_entity_number
       stx $52
-    sta sound_buffer_offset
+    sta game_status_flags
 
 label_0b3e
   sta player_1_score_digits, x
@@ -845,7 +882,7 @@ label_0b6c
     sta $da14, x
           dex
        bpl label_0b6c
-    jsr label_114c
+    jsr reset_entity_count_and_udgs
 
 label_0b7d
     ldx #$00
@@ -884,7 +921,7 @@ label_0ba8
       lda $53
       and #$01
       beq label_0bf2
-      ldx $cb
+      ldx pressed_key_code
       cpx #$03
       bne label_0bbf
    jmp label_0b30
@@ -912,7 +949,7 @@ handle_player_2_joystick
   and #$10                     ; Is fire button down?
   bne label_0bef
   lda $0426                    ; L of Player 2 lives display??
-  cmp #$20
+  cmp #c_empty
   beq label_0bf2
   bne label_0c2b
 
@@ -954,12 +991,12 @@ label_0c15
 
 toggle_2_player_indicator
    lda screen+$26  ; Top left of screen 
-   cmp #$20        ; If it's a space..
+   cmp #c_empty    ; If it's a space..
    beq .enable_2_player
-   lda #$20        ; Make it a space
+   lda #c_empty    ; Make it a space
    !byte $2c       ; BIT NOP hack
 .enable_2_player
-   lda #$40        ; Make it a player icon (potentially NOPped)
+   lda #c_player   ; Make it a player icon (potentially NOPped)
    sta screen+$26  ; Store back in top left of screen
    rts
 
@@ -972,7 +1009,7 @@ label_0c2b
    sty p1_lives
    jsr load_3_2_6_to_14_aa_be_with_x_offset
    lda screen+$26   ; Are we in 2 player mode (second player icon in
-   cmp #$40         ; top left of screen?)
+   cmp #c_player    ; top left of screen?)
    beq .start_2player
    ldy #$00         ; IF not, give player 2 zero lives
 
@@ -1011,7 +1048,7 @@ label_0c6f
    inx
    bne label_0c6f
    sta var_a_init_zero
-   sta var_b_init_zero
+   sta spars_spawned_by_0d33
    lda #$02
    sta var_c
    sta var_d
@@ -1029,7 +1066,7 @@ label_0c8c
    stx var_f_init_12
    dex
    stx var_g_init_11
-   jsr label_114c
+   jsr reset_entity_count_and_udgs
    lda p1_lives
    beq label_0c9f
    ldx #$00
@@ -1037,77 +1074,83 @@ label_0c8c
 
 label_0c9f
    lda p2_lives
-   beq label_0ca8
+   beq spawn_initial_spars
    ldx #$01
    jsr label_19a8
 
-label_0ca8
-      lda #$05
-      sta $fe
+   
+.initial_spars_to_spawn = $fe   
+   
+spawn_initial_spars
+   lda #$05
+   sta .initial_spars_to_spawn
 
-label_0cac
+.spawn_initial_spars_loop
    jsr set_xy_to_random_empty_space_coord
-      lda #$3f
+   lda #c_spar
    jsr write_a_to_screen_position_xy
-      lda #$01
+   lda #$01          ; Spar type. Initial ones are always shield
    jsr write_a_to_screen_position_xy_plus_212
-      dec $fe
-      bne label_0cac
-      lda #$f9
-      sta $a1
+   dec .initial_spars_to_spawn
+   bne .spawn_initial_spars_loop
+   lda #$f9
+   sta $a1
 
-label_0cc1
-      ldy $cb
-      cpy #$06
-      bne label_0cdc
-   lda sound_buffer_offset
-      eor #$01
-   sta sound_buffer_offset
+game_loop:
+   ldy pressed_key_code
+   cpy #$06                ; Is F5, Pause, being pressed?
+   bne label_0cdc          ; 
+   lda game_status_flags   ; 
+   eor #$01
+   sta game_status_flags
 
-label_0ccf
+   
+.target_jiffytime = $fc
+
+wait_16jiffies
   lda jiffy_clock      
   clc
   adc #$0f
-  sta $fc
+  sta .target_jiffytime
 
 .wait_16jiffies_loop
   lda jiffy_clock      
-  cmp $fc
+  cmp .target_jiffytime
   bne .wait_16jiffies_loop
 
 label_0cdc
-   lda sound_buffer_offset
+   lda game_status_flags
    beq label_0d01
    lda jiffy_clock
    and #$01
    tax
    tya
    cmp $1f05, x
-   bne label_0cc1
+   bne game_loop
    lda p1_lives, x
-   beq label_0cc1
+   beq game_loop
    inc $1f18, x
    lda $1f18, x
    ora #$20
    sta $4400, x
    jsr label_1269
-   jmp label_0ccf
+   jmp wait_16jiffies
 
 label_0d01
-      lda interrupt_counter
-      beq label_0d0b
+   lda interrupt_counter
+   beq label_0d0b
    jsr label_1ad9
    jmp label_183a
 
 label_0d0b
-      lda $a1
-      bmi label_0d1b
-      lda #$f9
-      sta $a1
-      inc $3f
-      bne label_0d1b
-      lda #$ff
-      sta $3f
+   lda $a1
+   bmi label_0d1b
+   lda #$f9
+   sta $a1
+   inc $3f
+   bne label_0d1b
+   lda #$ff
+   sta $3f
 
 label_0d1b
       dec var_e
@@ -1128,27 +1171,28 @@ label_0d2d
 label_0d33
    jsr label_152d
    lda sid_voice3_oscillator_ro
-      bne label_0d55
+   bne .dont_spawn_spar
    lda sid_voice3_oscillator_ro
-      cmp #$c8
-      bcc label_0d55
-      lda var_b_init_zero
-      cmp #$05
-      bcs label_0d55
-      inc var_b_init_zero
+   cmp #$c8
+   bcc .dont_spawn_spar
+   lda spars_spawned_by_0d33
+   cmp #$05
+   bcs .dont_spawn_spar
+   inc spars_spawned_by_0d33
    jsr set_xy_to_random_empty_space_coord
-      lda #$3f
+   lda #c_spar
    jsr write_a_to_screen_position_xy
-   jsr label_1db0
+   jsr select_random_spar_type
 
-label_0d55
-   jmp label_0cc1
+.dont_spawn_spar
+   jmp game_loop
 
+; ------------------------------------------------------------------------
 label_0d58
    ldx #$00
    stx $fd
    clc
-   adc $fd
+   adc $fd       ; What?
    tax
    tya
    asl
@@ -1170,30 +1214,31 @@ label_0d65
 
 ; -----------------------------------------------------------------------
 
-label_0d76
-  lda $b9
-  clc
-  ror
-  ldx #$00
-  bcc label_0d80
+load_udg_localvars
+  lda udg_slot_to_load_to            ; "Slot number"
+  clc                 
+  ror                ; Divide by 2 and set carry if it was odd.
+  ldx #$00           
+  bcc label_0d80     ; Evens go at $xx00, odds go at $xx80.
   ldx #$80
 
 label_0d80
   stx self_mod_sta_base_address_lo
   clc
-  adc #$2a
+  adc #$2a           ; A still holds slot number divided by 2, add 
+                     ; base page.
   sta self_mod_sta_base_address_hi
   lda #$00
   ldx #$7f
 
-label_0d8d
+.clear_128_bytes
    jsr self_modified_sta_plus_x
    dex
-   bpl label_0d8d
-   lda $44
-   asl
-   asl
-   asl
+   bpl .clear_128_bytes
+   lda udg_number_to_load
+   asl    ; x2
+   asl    ; x4
+   asl    ; x8
    tay
    ldx #$00
 
@@ -1456,11 +1501,6 @@ label_0eef
 label_0efb
    lda $20e2, x
 
-label_0f08 = $0f08
-label_0fed = $0fed
-label_1c4c = $1c4c
-label_1dca = $1dca
-label_1dc7 = $1dc7
 
 
   
@@ -1469,7 +1509,9 @@ label_0efe
       and $1ef6, x
       beq label_0f08
       lda $c4
-      bit $20a9
+      !byte $2c                 ; BIT skip hack
+label_0f08
+      lda #$20
       sta $06
       ldx $fd
    jsr write_a_to_screen_position_xy
@@ -1564,6 +1606,7 @@ update_status_bar_just_shields:
 ; ----------------------------------------------------------------------
    
 ; SELF MODIFYING CODE ALERT
+!zone read_write_a_to_screen_buffer
 
 .temp_acc_store = $0c
 
@@ -1590,17 +1633,19 @@ read_a_from_screen_position_xy
 
 ; ----------------------------------------------------------------------         
          
+!zone read_write_a_to_screen_adjacent_buffers
+
 write_a_to_screen_position_xy_plus_212
    sta $0c
    lda #$9d             ; STA absolute, x
    sta .selfmod_instruction2
-   bne label_0fd3
+   bne .calculate_screen_address_plus_212
 
 read_a_from_screen_position_xy_plus_212
    lda #$bd             ; LDA absolute, x
    sta .selfmod_instruction2
 
-label_0fd3
+.calculate_screen_address_plus_212
    lda screen_line_address_lowbytes, y
    sta .selfmod_instruction2+1
    lda screen_line_address_highbytes, y
@@ -1608,7 +1653,7 @@ label_0fd3
    adc #$d4
    sta .selfmod_instruction2+2
 
-label_0fe2
+if_were_going_to_selfmodify_why_not_just_jump_in_from_another_routine:
    lda $0c
 .selfmod_instruction2:
    lda $0400, x
@@ -1616,19 +1661,28 @@ label_0fe2
    
 ; ---------------------------------------------------------------------
          
+; Writes a to screen position plus 188. Not a separate zone because it
+; reuses the self modified instruction above. Also, this uses the BIT
+; skip hack where the previous ones didn't although they could have.
+; Possibly the author added this in Crossroads 2 and didn't originally
+; know about the BIT hack?
 
-label_0fe8
-      sta $0c
-      lda #$9d
-   bit $bda9
-   sta $0fe4
+write_a_to_screen_position_xy_plus_188
+   sta $0c
+   lda #$9d                ; STA absolute, x
+   !byte $2c               ; BIT skipping hack
+   
+read_a_from_screen_position_xy_plus_188
+   lda #$bd                ; LDA absolute, x
+    
+   sta .selfmod_instruction2
    lda screen_line_address_lowbytes, y
-   sta $0fe5
+   sta .selfmod_instruction2+1
    lda screen_line_address_highbytes, y
-         clc
-      adc #$bc
-   sta $0fe6
-   jmp label_0fe2
+   clc
+   adc #$bc
+   sta .selfmod_instruction2+2
+   jmp if_were_going_to_selfmodify_why_not_just_jump_in_from_another_routine
 
 ; -----------------------------------------------------------------   
    
@@ -1640,8 +1694,8 @@ clear_explosions:
 
 .explosion_clear_loop
   sta explosion_status, x
-  sta $d000, x           ; Covers sprite coordinates 0-3
-  sta $d008, x           ; Covers sprite coordinates 4-7
+  sta vic_sprite_coord_array, x           ; Covers sprite coordinates 0-3
+  sta vic_sprite_coord_array+8, x           ; Covers sprite coordinates 4-7
   dex
   bpl .explosion_clear_loop
   rts
@@ -1652,7 +1706,7 @@ clear_explosions:
   
 interrupt_service_routine:
   inc interrupt_counter
-  ldx sound_buffer_offset
+  ldx game_status_flags
   lda sound_buffer, x
   sta sid_volume_filter
   beq label_102b
@@ -1705,7 +1759,7 @@ label_105e:
   
  label_1067:
   tax
-  lda $d41b
+  lda sid_voice3_oscillator_ro
   and $1f41, x
   clc
   adc $1f3d, x
@@ -1715,19 +1769,19 @@ label_105e:
   lda $8f 
   
 label_107a:
-  sta $d401, y
+  sta sid_voice1_high_freq, y
   lda #$09
-  sta $d405, y
+  sta sid_voice1_att_dec, y
   lda #$00
-  sta $d404, y
+  sta sid_voice1_control, y
   txa
-  sta $d404, y
+  sta sid_voice1_control, y
   ldx $6a
   dec $68, x
   bne label_1098
   lda #00
   sta $66, x
-  sta $d404, y
+  sta sid_voice1_control, y
 
 label_1098:  
   dex
@@ -1780,60 +1834,68 @@ label_10d6:
   label_10e0:
   ldx #$07
   
-label_10e2:
+.do_explosions_loop:
   lda explosion_status, x
   beq label_1143
-  ldy explosion_array_a, x
-  lda explosion_array_b, x
+  ldy explosion_or_implosion, x
+  lda explosion_sprite_pointer_offset, x
   clc
-  adc $1f1e, y
-  cmp $1f1c, y
+  adc data_explosion_deltas, y
+  cmp data_explosion_limits, y
   beq label_110f
-  sta explosion_array_b, x
+  sta explosion_sprite_pointer_offset, x
   sec
   sbc #$02
-  cmp $1f1c, y
+  cmp data_explosion_limits, y
   bne label_1139
-  ldy $4058, x
-  lda $4500, y
-  and #$bf
-  sta $4500, y
+  ldy exploding_entity_index, x
+  lda entity_status_byte, y
+  and #$bf           ; Reset bit 7
+  sta entity_status_byte, y
   jmp label_1139
+  
 label_110f:
-
   cpy #00
-  beq label_112c
+  beq .end_explosion
   lda $4038, x
-  beq label_112c
-  lda $4030, x
+  beq .end_explosion
+  lda explosion_count_up_array, x
   clc
   adc #01
   cmp #$0f
-  bcs label_112c
-  sta $4030, x
+  bcs .end_explosion
+  sta explosion_count_up_array, x
   lda $4038, x
   adc #$f5
   bne label_1140
   
-label_112c:  
+.end_explosion:  
+  ; Clear explosion status entry
   lda #$00
-  sta explosion_status, x
+  sta explosion_status, x       
+
+  ; Sprite coord array is in pairs x/y, so multiply explosion number
+  ; by 2 to get sprite number used for it  
   txa
   asl
   tay
+  
+  ; Move that sprite to y coordinate 0
   lda #$00
-  sta $d001, y
+  sta vic_sprite_coord_array+1, y
+  
  label_1139: 
-  lda $4040, x
+  lda explosion_base_sprite_pointer, x
   clc
-  adc explosion_array_b, x
+  adc explosion_sprite_pointer_offset, x
   
 label_1140:
-  sta $07f8, x
+  sta vic_sprite_pointer_array, x
+  
 label_1143:
   dex
   bmi label_1149
-  jmp label_10e2
+  jmp .do_explosions_loop
 
 label_1149:
   jmp $ea31    ; System interrupt service routine
@@ -1841,60 +1903,63 @@ label_1149:
 ; ----------------------------------------------------------------------
   
 
-label_114c
-      lda #$00
-      sta found_empty_entity_number
-      sta $bc
-      ldx #$12
-      lda #$ff
+reset_entity_count_and_udgs
+  lda #$00                         ; Set empty entity to 0
+  sta found_empty_entity_number
+  sta $bc                          ; ?? 
+  
+; Reset UDG slot index array to $ff  
+  ldx #$12
+  lda #$ff
+.reset_udg_index_array
+  sta slot_udg_loaded_into, x
+  sta $4083, x
+  dex
+  bpl .reset_udg_index_array
+  
+  lda #$00
+  sta udg_slot_to_load_to
+  lda #$10
+  sta udg_number_to_load
 
-label_1156
-   sta $4096, x
-   sta $4083, x
-         dex
-      bpl label_1156
-      lda #$00
-      sta $b9
-      lda #$10
-      sta $44
-
-label_1167
-   jsr label_0d76
-      lda $b9
-      ldy $44
-   sta $4096, y
-      inc $44
-      inc $b9
-      cpy #$13
-      bcc label_1167
-      ldx #$0c
-      stx var_f_init_12
-         dex
-      stx var_g_init_11
-   lda sid_voice3_oscillator_ro
-      and #$1f
-      adc #$28
-      sta $6e
-         rts
+.load_initial_udgs_loop     ; Load 13 initial UDGs from $10 upwards
+  jsr load_udg_localvars    ; Actually load current UDG
+  lda udg_slot_to_load_to   ; Add it to index array
+  ldy udg_number_to_load
+  sta slot_udg_loaded_into, y
+  inc udg_number_to_load    ; Increment UDG and slot to load
+  inc udg_slot_to_load_to
+  cpy #$13                  ; Repeat if less than 13 loaded
+  bcc .load_initial_udgs_loop
+  
+  ldx #$0c
+  stx var_f_init_12
+  dex
+  stx var_g_init_11
+  lda sid_voice3_oscillator_ro
+  and #$1f
+  adc #$28
+  sta $6e
+  rts
          
 ; -------------------------------------------------------------------         
 
 label_118a
    lda sid_voice3_oscillator_ro
-      and #$0f
-         tax
-      lda level_units_c
-   cmp $1f48, x
-      bcc label_118a
-   lda $4096, x
-      bpl label_11dc
-      lda $b9
-      cmp #$0a
-      bcc label_11bd
-      bne label_118a
-      cpx #$03
-      beq label_118a
-      cpx #$04
+   and #$0f
+   tax
+   lda level_units_c
+   cmp enemy_release_schedule, x
+   bcc label_118a
+   lda slot_udg_loaded_into, x
+   bpl label_11dc
+   lda udg_slot_to_load_to
+   cmp #$0a
+   bcc label_11bd
+   bne label_118a
+   cpx #$03
+   beq label_118a
+   cpx #$04
       beq label_118a
    lda $4099
       bmi label_11bd
@@ -1905,12 +1970,12 @@ label_118a
       ldx #$02
 
 label_11bd
-      inc $b9
-      lda $b9
-   sta $4096, x
-      stx $44
-   jsr label_0d76
-      ldx $44
+      inc udg_slot_to_load_to
+      lda udg_slot_to_load_to
+   sta slot_udg_loaded_into, x
+      stx udg_number_to_load
+   jsr load_udg_localvars
+      ldx udg_number_to_load
       lda level_units_c
    cmp $1fe2, x
       bcc label_11dc
@@ -1920,15 +1985,15 @@ label_11bd
    sta $4083, x
 
 label_11dc
-      stx $44
+      stx udg_number_to_load
    jsr set_xy_to_random_empty_space_coord
-      lda $44
+      lda udg_number_to_load
    jsr label_13fa
       ldx $a3
       lda #$00
    jsr label_12fb
       ldx $a3
-      lda $44
+      lda udg_number_to_load
       cmp #$0c
       bne label_120f
       lda level_units_c
@@ -1944,11 +2009,13 @@ label_11dc
    sta entity_status_byte, x
 
 label_120f
-      lda $8e
-      bpl label_1219
-      lda #$00
+   lda $8e
+   bpl label_1219
+   lda #$00
    sta entity_shields, x
-         rts
+   rts
+
+; --------------------------------------------------------------------
 
 label_1219
    ldy entity_y_coords, x
@@ -2020,7 +2087,7 @@ label_1279
       stx $8d
    lda entity_facing, x
          tay
-   lda $1f0b, y
+   lda unknown_facing_table, y
          clc
    adc $4200, x
       sta $fb
@@ -2067,7 +2134,7 @@ label_12c3
    lda $fb
    jsr write_a_to_screen_position_xy
    lda $8d
-   jmp label_0fe8
+   jmp write_a_to_screen_position_xy_plus_188
 
 set_xy_to_random_empty_space_coord
    lda sid_voice3_oscillator_ro
@@ -2107,7 +2174,7 @@ label_130a
 label_130d
    lda explosion_status, x
       beq label_133b
-   lda explosion_array_a, x
+   lda explosion_or_implosion, x
       bne label_1328
       dec $8e
       bpl label_1328
@@ -2135,14 +2202,14 @@ label_132b
 
 label_1334
       stx var_a_init_zero
-   lda explosion_array_a, x
+   lda explosion_or_implosion, x
       beq label_132b
 
 label_133b
       lda #$00
-   sta $4030, x
+   sta explosion_count_up_array, x
       lda $fc
-   sta explosion_array_a, x
+   sta explosion_or_implosion, x
       beq label_1359
       ldy entity_number_that_hit_player
       cpy #$0c
@@ -2163,17 +2230,17 @@ label_1361
    sta $4038, x
       ldy $fc
    lda $1f1a, y
-   sta explosion_array_b, x
+   sta explosion_sprite_pointer_offset, x
    lda sid_voice3_oscillator_ro
       and #$01
          tay
    lda $1f09, y
-   sta $4040, x
+   sta explosion_base_sprite_pointer, x
       lda $fe
-   sta $4058, x
+   sta exploding_entity_index, x
          tay
    lda $4400, y
-   sta $d027, x
+   sta vic_sprite_color_array, x
    lda entity_status_byte, y
       bmi label_138d
       lda #$00
@@ -2196,15 +2263,15 @@ label_1396
       lda #$ff
          sec
    sbc $1efd, x
-   and $d010
+   and vic_sprite_x_hibits
    jmp label_13b6
 
 label_13b0
    lda $1efd, x
-   ora $d010
+   ora vic_sprite_x_hibits
 
 label_13b6
-   sta $d010              
+   sta vic_sprite_x_hibits              
    lda entity_x_coords, y
    asl
    asl
@@ -2216,7 +2283,7 @@ label_13b6
    asl
    tay
    lda $fc
-   sta $d000, y
+   sta vic_sprite_coord_array, y
       ldy $fe
    lda entity_status_byte, y
       bmi label_13d7
@@ -2243,9 +2310,13 @@ label_13dc
          asl
          tay
       lda $fc
-   sta $d001, y
+   sta vic_sprite_coord_array+1, y
    inc explosion_status, x
          rts
+
+; --------------------------------------------------------------------
+
+; Also part of new entity setup?
 
 label_13fa
       sta last_facing_for_joystick_position
@@ -2345,7 +2416,7 @@ label_1447
          lsr
          lsr
    sta $4700, x
-   lda $4096, y
+   lda slot_udg_loaded_into, y
          asl
          asl
          asl
@@ -2451,20 +2522,22 @@ label_152a
       ldx proposed_entity_x_coord
          rts
 
+; ---------------------------------------------------------------------         
+         
 label_152d
-      lda $6e
-      beq label_153a
+   lda $6e
+   beq label_153a
    jsr label_118a
-      lda $8e
-      bmi label_1549
-      dec $6e
+   lda $8e
+   bmi label_1549
+   dec $6e
 
 label_153a
    lda sid_voice3_oscillator_ro
-      bne label_1549
+   bne label_1549
    lda sid_voice3_oscillator_ro
-      cmp level_x4_p70
-      bcs label_1549
+   cmp level_x4_p70
+   bcs label_1549
    jsr label_118a
 
 label_1549
@@ -2486,6 +2559,8 @@ label_155c
       inc $3c
          rts
 
+; -------------------------------------------------------------------         
+         
 label_1563
    lda entity_shields, x
       beq label_1549
@@ -2936,7 +3011,7 @@ label_186b
       bne label_1876
       lda p2_lives
       bne label_1876
-   jmp label_1aac
+   jmp show_game_over
 
 label_1876
    jmp label_0d0b
@@ -2978,9 +3053,9 @@ label_1899
    jsr propose_direction_y_move_coords_for_entity_x
    jsr load_a_with_screen_at_proposed_coords
    ldx processing_entity_number
-   cmp #$20
+   cmp #c_empty
    beq label_18d1
-   cmp #$3f             ; Sets carry if a >= $3f..
+   cmp #c_spar             ; Sets carry if a >= $3f..
    bcs label_18d1
    lda $06
    sta last_facing_for_joystick_position
@@ -3006,9 +3081,9 @@ label_18d9
       sta $42
       ldx processing_entity_number
          pla
-      cmp #$20
+      cmp #c_empty
       beq label_1959
-      cmp #$3f
+      cmp #c_spar
       beq label_191f
       cmp #$3f
       bcc label_1953
@@ -3151,7 +3226,7 @@ flip_top_bit_and_clear_third_bit_of_4500
 
 ; -----------------------------------------------------------------         
          
-label_19a3
+reduce_player_x_lives
    dec p1_lives, x
    jsr load_3_2_6_to_14_aa_be_with_x_offset
 
@@ -3272,7 +3347,7 @@ label_1a7c
       cmp #$40
       bcc label_1a8c
       ldx temp_entity_x_coord
-   jsr label_0fed
+   jsr read_a_from_screen_position_xy_plus_188
       inc $42
       ldx $fc
    sta $40ae, x
@@ -3298,23 +3373,32 @@ label_1aa1
    sta $4400, x
          rts
 
-label_1aac
-      ldx #$08
+; ------------------------------------------------------------------
 
-label_1aae
-   lda $1ff5, x
-      beq label_1abb
-   sta $0617, x
-      lda jiffy_clock
-   sta $da17, x
+!zone show_game_over
+  
+show_game_over
 
-label_1abb
-         dex
-      bpl label_1aae
-   jsr label_1d99
-      beq label_1ac6
+; Draw game over message on screen. Make it flash by copying value
+; of jiffy clock into color map at location of message.
+
+   ldx #$08
+.game_over_print_loop
+   lda game_over_message, x
+   beq .game_over_skip_letter
+   sta screen+$217, x
+   lda jiffy_clock
+   sta colors+$217, x
+.game_over_skip_letter
+   dex
+   bpl .game_over_print_loop
+   
+   jsr show_press_f7
+   beq label_1ac6
    jmp label_0d1b
 
+; --------------------------------------------------------------------   
+   
 label_1ac6
       lda #$93
    jsr $ffd2
@@ -3322,6 +3406,9 @@ label_1ac6
 
 ; ---------------------------------------------------------------   
    
+
+!zone copy_proposed_coords_to_actual_coords_entity_x
+  
 copy_proposed_coords_to_actual_coords_entity_x
    lda proposed_entity_x_coord
    sta entity_x_coords, x
@@ -3359,28 +3446,28 @@ label_1af4
 ; -------------------------------------------------------------------
 
 label_1afa
-      stx entity_number_that_hit_player
-   jsr propose_forward_moove_coords_for_entity_x
+  stx entity_number_that_hit_player
+  jsr propose_forward_moove_coords_for_entity_x
 
 label_1aff
-      ldx proposed_entity_x_coord
-      ldy proposed_entity_y_coord
-      bne label_1b0e
+  ldx proposed_entity_x_coord
+  ldy proposed_entity_y_coord
+  bne label_1b0e
 
 label_1b05
-      stx entity_number_that_hit_player
-   ldy entity_y_coords, x
-   lda entity_x_coords, x
-         tax
+  stx entity_number_that_hit_player
+  ldy entity_y_coords, x
+  lda entity_x_coords, x
+  tax
 
 label_1b0e
-   jsr label_0fed
-         tay
-      ldx entity_number_that_hit_player
-      sty $0a
+  jsr read_a_from_screen_position_xy_plus_188
+  tay
+  ldx entity_number_that_hit_player
+  sty $0a
 
 label_1b16
-         rts
+  rts
 
 label_1b17
       lda $4d
@@ -3460,30 +3547,30 @@ label_1b88
 
 label_1b9f
    ldy entity_facing, x
-      ldx $fd
+   ldx $fd
    jsr propose_direction_y_move_coords_for_entity_x
-      ldx processing_entity_number
+   ldx processing_entity_number
    jsr copy_proposed_coords_to_actual_coords_entity_x
-      ldx $fd
+   ldx $fd
    lda entity_status_byte, x
-      bpl label_1bbb
-      ldx processing_entity_number
+   bpl label_1bbb
+   ldx processing_entity_number
    jsr propose_forward_moove_coords_for_entity_x
    jsr copy_proposed_coords_to_actual_coords_entity_x
 
 label_1bbb
-      lda $fd
-      cmp #$02
-      bcs label_1bc6
-      ldx processing_entity_number
+   lda $fd
+   cmp #$02
+   bcs label_1bc6
+   ldx processing_entity_number
    sta $4300, x
 
 label_1bc6
    jsr load_a_with_screen_at_proposed_coords
    ldx processing_entity_number
-   cmp #$20       ; empty
+   cmp #c_empty        ; empty
    beq label_1beb
-   cmp #$40       ; player
+   cmp #c_player       ; player
    bcs label_1bd9
    lda #$00       ; collided with something else, die      
    sta entity_shields, x
@@ -3548,7 +3635,9 @@ label_1c33
       and #$20
       beq label_1c4c
    dec entity_shields, x
-   bit $07a0
+!byte $2c                 ; BIT skip hack
+label_1c4c
+   ldy #$07
       sty $0b
    lda $4100, x
       cmp #$01
@@ -3605,7 +3694,7 @@ label_1ca4
       bne label_1cb7
 
 label_1cb4
-   jmp label_19a3
+   jmp reduce_player_x_lives
 
 label_1cb7
    lda $4300, x
@@ -3654,9 +3743,9 @@ label_1cf9
       dec $fe
       bmi label_1cee
    jsr set_xy_to_random_empty_space_coord
-      lda #$3f
+      lda #c_spar    ; spar
    jsr write_a_to_screen_position_xy
-   jsr label_1db0
+   jsr select_random_spar_type
       bne label_1cf9
 
 label_1d0a
@@ -3701,7 +3790,7 @@ label_1d3b
    stx level_units_a
 
 label_1d4e
-   jsr label_1d99
+   jsr show_press_f7
    bne label_1d4e
    jsr update_status_bar
    jsr label_0ea7
@@ -3741,40 +3830,62 @@ flip_bit_3_on_status_of_entity_x
 
 ; --------------------------------------------------------------------         
          
-label_1d99
-      ldx #$07
+!zone show_press_f7
 
-label_1d9b
-   lda $1ffe, x
-   beq label_1da8
-   sta $05c7, x
-   lda #$0a
-   sta $d9c7, x
+; Shows the "Press F7" message. Also checks if F7 is actually being
+; pressed and sets eq flag accordingly.
+  
+show_press_f7
+   
+   ldx #$07                         ; 7 characters
+.print_pressf7_loop
+   lda $1ffe, x                     ; Get character of "PRESS F7"
+   beq .pressf7_skip_letter         ; If zero, don't draw
+   sta screen+$1c7, x               ; Put character on screen
+   lda #$0a                         ; Set matching color cell to 10
+   sta colors+$1c7, x
+.pressf7_skip_letter
+   dex                              ; Loop
+   bpl .print_pressf7_loop
+   
+   lda pressed_key_code             ; Read pressed key
+   cmp #$03                         ; Compare to F7 ($3)
+   rts
 
-label_1da8
-         dex
-      bpl label_1d9b
-      lda $cb
-      cmp #$03
-         rts
+; --------------------------------------------------------------------
 
-label_1db0
-   lda sid_voice3_oscillator_ro
-      and #$03
-      bne label_1dca
-      lda #$02
-      cmp level_units_c
-      bcs label_1dca
-   lda sid_voice3_oscillator_ro
-      and #$01
-      beq label_1dc7
-      lda #$02
-   bit $06a9
-   bit $01a9
+; Choose a random one from 3 types for a newly spawned spar. Called
+; directly after spawning a spar with x/y still holding its location.
+; New feature in Crossroads 2 so was probably added in?   
+
+!zone select_random_spar_type      
+         
+select_random_spar_type
+   ; Always 3/4 chance of a shield spar.
+   lda sid_voice3_oscillator_ro   ; Get random value from osc
+   and #$03                       ; Mask off bits
+   bne .select_shield_spar        ; If not 0 (3/4), shield spar.
+   ; If level too low, always shield spar.
+   lda #$02                       ; If level too low, always shield spar.
+   cmp level_units_c
+   bcs .select_shield_spar       
+   ; Select 50/50 between other two spar types.
+   lda sid_voice3_oscillator_ro   ; Get random value from osc
+   and #$01                       ; Mask off just one bit
+   beq label_1dc7                 ; If zero, spar type 6
+   lda #$02                       ; Else, spar type 2
+   !byte $2c              ; BIT skip hack
+label_1dc7
+   lda #$06
+   !byte $2c              ; BIT skip hack
+.select_shield_spar
+   lda #$01
+   
    jmp write_a_to_screen_position_xy_plus_212
 
 ; --------------------------------------------------------------------   
-   
+  
+ 
 load_a_with_screen_at_entity_x_forward_coords
    jsr propose_forward_moove_coords_for_entity_x
 
@@ -3785,6 +3896,8 @@ load_a_with_screen_at_proposed_coords
    
 ; ---------------------------------------------------------------------   
 
+!zone load_3_2_6_to_14_aa_be_with_x_offset
+  
 load_3_2_6_to_14_aa_be_with_x_offset
       lda #$03
       sta p1_shields_copy, x       
@@ -3833,13 +3946,13 @@ facing_offset_table_vert:
 ; Note that 5 is subtracted before the value is used as the index 
 ; because joystick values 0-4 are all impossible.
 joystick_offset_table:
-!byte $00       ; %0101, down+right
-!byte $01       ; %0110, up+right          
-!byte $02       ; %0111, right
-!byte $80       ; %1000, impossible (up+down+left)
-!byte $00       ; %1001, left+down
-!byte $01       ; %1010, left+up 
-!byte $03       ; %1011, left 
+!byte $00       ; %0101, down+right => down
+!byte $01       ; %0110, up+right   => up       
+!byte $02       ; %0111, right      => right
+!byte $80       ; %1000, impossible (up+down+left) => idle
+!byte $00       ; %1001, left+down  => down
+!byte $01       ; %1010, left+up    => up
+!byte $03       ; %1011, left       => left
 !byte $80       ; %1100, impossible (up+down)
 !byte $00       ; %1101, down
 !byte $01       ; %1110, up
@@ -3850,9 +3963,17 @@ joystick_offset_table:
 ; This array is indexed into by startup loop.
 !byte $80,$40,$20,$10,$08,$04,$02,$01
 !byte $02,$04,$08,$10,$20,$40,$80,$04
-!byte $05,$01,$25,$C0,$DB,$08,$0C,$00
+!byte $05,$01,$25,$C0,$DB
+
+unknown_facing_table:
+!byte $08,$0C,$00
 !byte $04,$01,$00,$03,$02,$02,$03,$00
-!byte $08,$10,$02,$05,$19,$03,$02,$1A
+!byte $08,$10,$02,$05,$19,$03
+
+data_explosion_limits:
+!byte $02,$1a
+
+data_explosion_deltas:
 !byte $FF,$01
 
 spar_images:
@@ -3886,9 +4007,17 @@ spar_images:
 
 !byte $00,$07,$21,$81,$11,$11
 !byte $03,$00,$10,$40,$07,$1F,$0F,$07
-!byte $8F,$00,$01,$07,$11,$08,$02,$04
-!byte $05,$03,$05,$06,$04,$08,$01,$09
-!byte $01,$01,$00,$01,$13,$02,$32,$07
+
+
+possible_sound_buffer:             
+!byte $8F,$00
+
+enemy_release_schedule:
+!byte $01,$07,$11,$08,$02,$04,$05,$03
+!byte $05,$06,$04,$08,$01,$09,$01,$01
+
+
+!byte $00,$01,$13,$02,$32,$07
 !byte $00,$05,$1F,$80,$3B,$2A,$09,$40
 !byte $05,$08,$10,$00,$20,$00,$32,$83
 !byte $94,$32,$22,$44,$75,$55,$52,$73
@@ -3907,7 +4036,9 @@ spar_images:
 !byte $5A,$53,$7A,$5A,$68,$62,$78,$58
 !byte $62,$20,$21,$20,$05,$12,$1E,$06
 !byte $09,$0C,$11,$0E,$10,$1A,$18,$18
-!byte $CF,$1C,$08,$0B,$00,$00,$32,$07
+!byte $CF,$1C,$08,$0B,$00,$00,$32
+game_over_message:
+!byte $07
 !byte $01,$0D,$05,$00,$0F,$16,$05,$12
 !byte $10,$12,$05,$13,$13,$00,$06,$37
 !byte $FF,$BF,$E0,$20,$00,$FA,$AA,$A8
