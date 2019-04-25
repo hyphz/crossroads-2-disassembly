@@ -2055,6 +2055,8 @@ label_120f
 
 ; --------------------------------------------------------------------
 
+!zone erase_entity_x_from_screen
+  
 erase_entity_x_from_screen:
    ldy entity_y_coords, x
    lda entity_x_coords, x
@@ -2066,13 +2068,16 @@ erase_entity_x_from_screen:
 
 ; --------------------------------------------------------------------   
    
-label_122a
-      sty $0f
-      lda #$01
-   jsr label_1b35
-      ldy $0f
+!zone fire_player_spawn_bullets
+  
+.temp_y_store = $0f
+fire_player_spawn_bullets
+   sty .temp_y_store
+   lda #$01
+   jsr fire_bullet_from_entity_y_in_direction_a
+   ldy .temp_y_store
    lda player_spawn_facing, y
-   jmp label_1b35
+   jmp fire_bullet_from_entity_y_in_direction_a
    
 ; ---------------------------------------------------------------------
 
@@ -3412,7 +3417,7 @@ spawn_player
 
 .player_spawn_clear
    ldy processing_entity_number
-   jsr label_122a
+   jsr fire_player_spawn_bullets
 
 .player_dead_dead
    jmp update_status_bar_not_scores   ; Tail call RTS
@@ -3579,6 +3584,8 @@ label_1af2
          
 ; -------------------------------------------------------------------
 
+!zone read_from_entityId_buffer
+  
 .tempstore_x = $09
 
 set_0a_and_y_to_entityid_that_x_collides_with
@@ -3631,7 +3638,7 @@ player_firing
    sta player_fire_cooldown_counter, y
    lda entity_facing, y
 
-label_1b35
+fire_bullet_from_entity_y_in_direction_a
    sta .bullet_direction
    sty processing_entity_number
    
