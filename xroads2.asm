@@ -20,6 +20,8 @@ pressed_key_code         = $cb
 stack                    = $0100
 screen                   = $0400
 vic_sprite_pointer_array = $07f8
+
+
 character_rom_base       = $d000  ; When mapped by ram_rom_mapping
 vic_sprite_coord_array   = $d000
 vic_sprite_x_hibits      = $d010 
@@ -73,6 +75,10 @@ slot_udg_loaded_into  = $4096
 ; 2-12 are player bullets
 ; 13+ are enemies
 
+vision_char_seen_indir = $4061
+vision_dist_seen_indir = $4065
+vision_nonwall_seen_indir = $40ae
+
 entity_enemy_type     = $4100
 entity_base_charno    = $4200
 entity_bullet_type    = $4300
@@ -81,7 +87,11 @@ entity_status_byte    = $4500
 entity_shields        = $4600
 p2_shields            = $4601
 entity_upd_cooldown   = $4700
+entity_data_ef        = $4800
+entity_data_cdlow     = $4900
+entity_type_fired_me  = $4a00
 entity_bullet_speed   = $4b00
+entity_x_unknown      = $4c00
 entity_upd_countdown  = $4d00
 entity_x_coords       = $4e00
 entity_y_coords       = $4f00
@@ -93,6 +103,9 @@ screen_line_address_highbytes = $6019
 player_1_score_digits = $6040
 player_2_score_digits = $6048
 high_score_digits     = $6050
+
+entity_id_buffer         = $c000
+
 
 temp_entity_x_coord               = $03
 last_facing_for_joystick_position = $04
@@ -123,6 +136,8 @@ level_tens                        = $b0
 level_units_a                     = $b1
 udg_slot_to_load_to               = $b9
 player_fire_cooldown                 = $be
+current_map_color                 = $c3
+current_wall_character                = $c4
 var_a_init_zero                   = $c9
 level_x4_p70                      = $d7
 
@@ -156,6 +171,8 @@ esb_invulnerable  =  $20
   
 first_frames:
 
+;Egghead
+
 !byte %##..###.
 !byte %.#.#..##
 !byte %.#.###..
@@ -164,6 +181,8 @@ first_frames:
 !byte %...#####
 !byte %..##.##.
 !byte %..#...##
+
+;Vacuum
 
 !byte %..###...
 !byte %.##.##..
@@ -174,6 +193,8 @@ first_frames:
 !byte %###.##.#
 !byte %.#..#...
 
+; Tagteam 1
+
 !byte %#.##....
 !byte %#.#..###
 !byte %.#####.#
@@ -182,6 +203,8 @@ first_frames:
 !byte %..###.##
 !byte %.##.##..
 !byte %.#...##.
+
+; Tagteam 2
 
 !byte %........
 !byte %##...###
@@ -192,6 +215,8 @@ first_frames:
 !byte %.##.##..
 !byte %.#...##.
 
+; Mutant
+
 !byte %........     
 !byte %..##....
 !byte %..#.....
@@ -200,6 +225,8 @@ first_frames:
 !byte %..##....
 !byte %###.#...
 !byte %.#...##.
+
+; Lemonshark
 
 !byte %.######.
 !byte %##..####
@@ -210,6 +237,8 @@ first_frames:
 !byte %###..##.
 !byte %#....###
 
+; Skull
+
 !byte %..####..
 !byte %.###..#.
 !byte %########
@@ -218,6 +247,8 @@ first_frames:
 !byte %##.#.#.#
 !byte %.#######
 !byte %.##...##
+
+; Chomper
 
 !byte %#####...
 !byte %#.#####.
@@ -228,6 +259,8 @@ first_frames:
 !byte %####....
 !byte %#..##...
 
+; Monkey
+
 !byte %##...###
 !byte %#...##.#
 !byte %#.######
@@ -236,6 +269,8 @@ first_frames:
 !byte %###.##..
 !byte %##...##.
 !byte %##....##
+
+; Rubberhead 1
 
 !byte %########
 !byte %#...####
@@ -246,6 +281,8 @@ first_frames:
 !byte %###.###.
 !byte %#....###
 
+; THrower
+
 !byte %....###.
 !byte %.#..#...
 !byte %###.###.
@@ -254,6 +291,8 @@ first_frames:
 !byte %.#..###.
 !byte %.#.####.
 !byte %.#.#..##
+
+; Archer
 
 !byte %###...##
 !byte %##...#.#
@@ -264,6 +303,8 @@ first_frames:
 !byte %##....##
 !byte %###.....
 
+; Dog
+
 !byte %........
 !byte %........
 !byte %........
@@ -272,6 +313,8 @@ first_frames:
 !byte %.#######
 !byte %.#####..
 !byte %.#...##.
+
+; Rubberhead 2
 
 !byte %..####..
 !byte %..#..##.
@@ -282,6 +325,8 @@ first_frames:
 !byte %.#.####.
 !byte %.#...##.
 
+; Flea
+
 !byte %.#......
 !byte %.#......
 !byte %#.......
@@ -290,6 +335,8 @@ first_frames:
 !byte %.####...
 !byte %..######
 !byte %..##.##.
+
+; Lion
 
 !byte %###.....
 !byte %#...####
@@ -300,6 +347,8 @@ first_frames:
 !byte %##....#.
 !byte %#.....##
 
+; Player
+
 !byte %..###...
 !byte %..###...
 !byte %..##....
@@ -309,6 +358,8 @@ first_frames:
 !byte %##..###.
 !byte %###.##..
 
+; Bullet
+
 !byte %........
 !byte %........
 !byte %........
@@ -318,6 +369,8 @@ first_frames:
 !byte %........
 !byte %........
 
+; Worm
+
 !byte %........
 !byte %........
 !byte %.#...#..
@@ -326,6 +379,8 @@ first_frames:
 !byte %...#...#
 !byte %........
 !byte %........
+
+; Spear
 
 !byte %........
 !byte %........
@@ -728,7 +783,7 @@ label_0a20
  lsr
  lsr
  sta $fc
- lda $1ef6, y
+ lda onebit_masks_zero_is_msb, y
  sta $fd
  lda $0480, x
  bmi label_0a55
@@ -906,7 +961,7 @@ label_0b48
   lda #<msg_banner
   ldy #>msg_banner
   jsr output_string_at_yyaa_until_zero_or_quote
-  jsr label_0ea7
+  jsr draw_new_map
   ldx #$0f
 
 label_0b6c
@@ -1070,7 +1125,7 @@ label_0c2b
    dex
    bpl .setup_lower_status_line_loop
    
-   jsr label_0ea7
+   jsr draw_new_map
    jsr update_status_bar
 
 label_0c6c
@@ -1335,15 +1390,15 @@ label_0de8
          tay
    jsr self_modified_lda_plus_y
       ldy $fc
-   and $1ef6, y
-   cmp $1ef6, y
+   and onebit_masks_zero_is_msb, y
+   cmp onebit_masks_zero_is_msb, y
       bne label_0e08
          txa
          tay
    jsr self_modified_lda_plus_y
       ldy $fc
          clc
-   adc $1efd, y
+   adc onebit_masks_zero_is_lsb, y
    jsr self_modified_sta_plus_x
 
 label_0e08
@@ -1377,8 +1432,8 @@ label_0e25
          tay
    jsr self_modified_lda_plus_y
       ldx temp_entity_x_coord
-   and $1ef6, x
-   cmp $1ef6, x
+   and onebit_masks_zero_is_msb, x
+   cmp onebit_masks_zero_is_msb, x
       bne label_0e4e
       lda $03
          clc
@@ -1387,7 +1442,7 @@ label_0e25
    jsr self_modified_lda_plus_y
          clc
       ldx $fe
-   adc $1efd, x
+   adc onebit_masks_zero_is_lsb, x
          pha
          tya
          tax
@@ -1480,55 +1535,66 @@ inc_and_clear_smb_64bytes
    
 !byte $20,$58,$0F    ; JSR $0f58?
 
-label_0ea7
+!zone draw_map
+  
+draw_new_map
+   ; Choose a random map number 0-7 which is not the same as current.
    lda sid_voice3_oscillator_ro
    and #$07
    clc
    adc #$26
-   cmp $c4
-   beq label_0ea7
-   sta $c4
+   cmp current_wall_character
+   beq draw_new_map
+   sta current_wall_character
 
-label_0eb5
+   ; Choose a random color from those in the lookup table.  
+.choose_map_color
    lda sid_voice3_oscillator_ro
-      and #$07
-         tax
-   lda $1ed3, x
-      cmp $c3
-      beq label_0eb5
-      sta $c3
-      lda #$00
-      sta $bb
-      ldx level_units_a
-      lda level_tens
-      bne label_0ed2
-      cpx #$05
-      bcc label_0ee2
+   and #$07
+   tax
+   lda map_colors, x
+   cmp current_map_color
+   beq .choose_map_color
+   sta current_map_color
+   
+   lda #$00
+   sta $bb
+   ldx level_units_a
+   lda level_tens
+   bne label_0ed2
+   cpx #$05
+   bcc label_0ee2
 
 label_0ed2
    lda sid_voice3_oscillator_ro
-      sta $bb
+   sta $bb
 
 label_0ed7
    jsr load_two_low_bits_of_osc3_to_accumulator
-         tax
-         inx
-      cpx $c8
-      beq label_0ed7
-      stx $c8
+   tax
+   inx
+   cpx $c8
+   beq label_0ed7
+   stx $c8
 
+   
+.current_x_coordinate = $fd
+.current_drawing_character = $06
+.current_bit_number = $03
+.current_map_offset = $02
+   
 label_0ee2
-   lda $1ece, x
-      sta $02
-      lda #$00
-      sta $03
-      sta $fd
-      ldy #$02
+   lda map_start_addresses, x
+   sta .current_map_offset
+   lda #$00
+   sta .current_bit_number
+   sta .current_x_coordinate
+   ldy #$02
 
-label_0eef
-      ldx $02
-      lda $bb
-      bmi label_0efb
+.draw_map_character
+   ldx .current_map_offset
+   lda $bb
+   bmi label_0efb
    lda $2006, x
    jmp label_0efe
 
@@ -1537,59 +1603,58 @@ label_0efb
 
 
 
-  
 label_0efe
-      ldx $03
-      and $1ef6, x
-      beq label_0f08
-      lda $c4
-      !byte $2c                 ; BIT skip hack
-label_0f08
-      lda #$20
-      sta $06
-      ldx $fd
+   ldx .current_bit_number
+   and onebit_masks_zero_is_msb, x
+   beq .draw_empty_space
+   lda current_wall_character
+   !byte $2c                 ; BIT skip hack
+.draw_empty_space
+   lda #$20               ; May be skipped
+   sta .current_drawing_character
+   ldx .current_x_coordinate
    jsr write_a_to_screen_position_xy
-      lda $c3
+   lda current_map_color
    jsr write_a_to_colors_position_xy
-      lda #$26
-         sec
-      sbc $fd
-         tax
-      lda $06
+   lda #$26
+   sec
+   sbc .current_x_coordinate
+   tax
+   lda .current_drawing_character
    jsr write_a_to_screen_position_xy
-      lda $c3
+   lda current_map_color
    jsr write_a_to_colors_position_xy
-      inc $03
-      inc $fd
-      lda $03
-      cmp #$08
-      bne label_0f36
-      lda #$00
-      sta $03
-      inc $02
+   inc .current_bit_number
+   inc .current_x_coordinate
+   lda .current_bit_number
+   cmp #$08
+   bne .no_new_byte
+   lda #$00
+   sta .current_bit_number
+   inc .current_map_offset
 
-label_0f36
-      lda $fd
-      cmp #$14
-      bne label_0eef
-         iny
-      cpy #$18
-      beq label_0f47
-      lda #$00
-      sta $fd
-      beq label_0eef
+.no_new_byte
+   lda .current_x_coordinate
+   cmp #20
+   bne .draw_map_character
+   iny
+   cpy #24
+   beq .done_drawing_map
+   lda #$00
+   sta .current_x_coordinate
+   beq .draw_map_character
 
-label_0f47
-      ldx #$27
+.done_drawing_map
+   ldx #$27
 
-label_0f49
-   lda $0450, x
-   sta $07c0, x
-      lda $c3
-   sta $dbc0, x
-         dex
-      bpl label_0f49
-         rts
+.copy_screen_forward
+   lda screen+$50, x
+   sta screen+$3c0, x
+   lda current_map_color
+   sta colors+$3c0, x
+   dex
+   bpl .copy_screen_forward
+   rts
 
 ; ---------------------------------------------------------------------
          
@@ -1667,7 +1732,7 @@ read_a_from_screen_position_xy
 
 ; ----------------------------------------------------------------------         
          
-!zone read_write_a_to_screen_entityId_buffers
+!zone read_write_a_to_screen_adjacent_buffers
 
 write_a_to_colors_position_xy
    sta $0c
@@ -1696,7 +1761,7 @@ if_were_going_to_selfmodify_why_not_just_jump_in_from_another_routine:
    
 ; ---------------------------------------------------------------------
          
-; Writes a to screen position plus $bc00, ie, $c400. This isn't a 
+; Writes a to screen position plus $bc00, ie, $c000. This isn't a 
 ; significant address that I can see.. Not a separate zone because it
 ; reuses the self modified instruction above. Also, this uses the BIT
 ; skip hack where the previous ones didn't although they could have.
@@ -2284,7 +2349,7 @@ label_133b
       ldy $0a
    lda entity_shields, y
       bne label_1359
-   lda $4c00, y
+   lda entity_x_unknown, y
       bne label_1361
 
 label_1359
@@ -2329,12 +2394,12 @@ label_1396
       bcs label_13b0
       lda #$ff
          sec
-   sbc $1efd, x
+   sbc onebit_masks_zero_is_lsb, x
    and vic_sprite_x_hibits
    jmp label_13b6
 
 label_13b0
-   lda $1efd, x
+   lda onebit_masks_zero_is_lsb, x
    ora vic_sprite_x_hibits
 
 label_13b6
@@ -2463,13 +2528,13 @@ load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
    lda enemy_initial_status, y
    sta entity_status_byte, x
    lda enemy_data_a, y
-   sta $4a00, x
+   sta entity_type_fired_me, x
    lda enemy_bullet_types, y
    sta entity_bullet_type, x
    lda enemy_data_cd, y
    pha
    and #$0f
-   sta $4900, x
+   sta entity_data_cdlow, x
    pla
    lsr
    lsr
@@ -2485,11 +2550,11 @@ load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
    lsr
    lsr
    lsr
-   sta $4c00, x
+   sta entity_x_unknown, x
    lda enemy_data_ef, y
    pha
    and #$0f
-   sta $4800, x
+   sta entity_data_ef, x
    pla
    lsr
    lsr
@@ -2531,7 +2596,7 @@ blank_out_entity_x_nondestructive
 ; --------------------------------------------------------------------
    
 label_14b8
-   lda $4c00, y
+   lda entity_x_unknown, y
    ldy $1f15, x
          clc
    adc $6045, y
@@ -2698,20 +2763,20 @@ label_1594
    ldx .stored_entity_number
    cmp #c_empty
    bne label_15a2
-   jmp label_1d7b   ; That's a hell of a jump!
+   jmp clear_bit_3_on_entity_x_and_draw  
 
 label_15a2
    ldy entity_bullet_type, x
-      bmi label_15ad
-      dec var_d
-      bne label_15ad
-      inc var_d
+   bmi label_15ad
+   dec var_d
+   bne label_15ad
+   inc var_d
 
 label_15ad
       cmp #$40
       bcc label_15bc
    jsr blank_out_entity_x_nondestructive
-      ldx $13
+   ldx .stored_entity_number
    jsr set_0a_and_y_to_entityid_that_x_collides_with
    jmp label_1bfb
 
@@ -2721,12 +2786,12 @@ label_15bc
    jmp blank_out_entity_x_nondestructive
 
 label_15c4
-   jsr label_1a10
+   jsr load_vision_buffers_entity_x
       ldy #$03
 
 label_15c9
       ldx var_f_init_12
-   lda $4061, y
+   lda vision_char_seen_indir, y
       cmp #$3f
       bcc label_15e0
       cmp #$40
@@ -2742,7 +2807,7 @@ label_15e0
    jmp label_1673
 
 label_15e6
-   ldx $40ae, y
+   ldx vision_nonwall_seen_indir, y
    lda entity_enemy_type, x
       cmp #$11
       bcc label_1609
@@ -2764,9 +2829,9 @@ label_1609
       ldx var_f_init_12
    cmp entity_enemy_type, x
       beq label_161a
-   cmp $4900, x
+   cmp entity_data_cdlow, x
       beq label_161a
-   cmp $4a00, x
+   cmp entity_type_fired_me, x
       bne label_1634
 
 label_161a
@@ -2783,7 +2848,7 @@ label_161a
    jmp label_15e0
 
 label_1634
-   ldx $40ae, y
+   ldx vision_nonwall_seen_indir, y
    lda entity_enemy_type, x
       cmp #$01
       bne label_1648
@@ -2852,10 +2917,10 @@ label_16a3
          dey
       bpl label_1696
       ldy $0e
-   lda $4065, y
+   lda vision_dist_seen_indir, y
       cmp #$01
       bne label_16c6
-   lda $4061, y
+   lda vision_char_seen_indir, y
       beq label_16c3
       cmp #$1b
       bcc label_16c3
@@ -2892,19 +2957,19 @@ label_16d1
 label_16e8
       ldx var_f_init_12
       ldy $0e
-   lda $4065, y
+   lda vision_dist_seen_indir, y
       cmp #$01
       beq label_174e
    lda entity_enemy_type, x
       cmp #$01
       bne label_174b
-   lda $4061, y
+   lda vision_char_seen_indir, y
       cmp #$40
       bcc label_1741
       lda #$03
    sta entity_upd_countdown, x
    sta entity_upd_cooldown, x
-   ldx $40ae, y
+   ldx vision_nonwall_seen_indir, y
    lda entity_facing, x
       sta $0a
          tay
@@ -2931,7 +2996,7 @@ label_172e
    jmp draw_entity_x
 
 label_173e
-   jmp label_1d7b
+   jmp clear_bit_3_on_entity_x_and_draw
 
 label_1741
       ldx var_f_init_12
@@ -2943,7 +3008,7 @@ label_174b
    jmp label_17e1
 
 label_174e
-   lda $4061, y
+   lda vision_char_seen_indir, y
       cmp #$3f
       bne label_1770
    inc entity_spars_eaten, x
@@ -2967,7 +3032,7 @@ label_1770
 label_1775
    lda $4069, y
       bne label_1794
-   lda $40ae, y
+   lda vision_nonwall_seen_indir, y
       sta $0a
       stx entity_number_that_hit_player
    jsr label_1bfb
@@ -2980,7 +3045,7 @@ label_1775
       bne label_17d9
 
 label_1794
-   ldx $40ae, y
+   ldx vision_nonwall_seen_indir, y
    lda entity_enemy_type, x
       cmp #$03
       bne label_17d9
@@ -2995,7 +3060,7 @@ label_1794
       sty $0a
    jsr blank_out_entity_x_nondestructive
       ldy $0a
-   ldx $40ae, y
+   ldx vision_nonwall_seen_indir, y
    lda entity_status_byte, x
       and #$80
          pha
@@ -3018,13 +3083,13 @@ label_17d9
 
 label_17e1
       ldx var_f_init_12
-   jsr label_1d7b
+   jsr clear_bit_3_on_entity_x_and_draw
    jmp label_1809
 
 label_17e9
       lda #$28
          sec
-   sbc $4065, y
+   sbc vision_dist_seen_indir, y
          clc
    adc $406d, y
    sta $406d, y
@@ -3037,7 +3102,7 @@ label_17f6
 label_17f7
    lda #$28      ; 40
    sec
-   sbc $4065, y  ; a = 40-(4065 entry)
+   sbc vision_dist_seen_indir, y  ; a = 40-(4065 entry)
    sta temp_entity_x_coord       ; $03 = 40-(4065 entry)
    lda $406d, y  ; a = (406d entry)
    sec
@@ -3115,7 +3180,7 @@ game_loop_players
    adc entity_spars_eaten+1     ; Add p2's collected spars.
    cmp #$05                     
    bcc .level_not_complete      ; If <5, level isn't complete. 
-   jmp label_1d0a
+   jmp end_of_level
 
 .level_not_complete
    lda p1_lives                 ; Is player 1 alive?
@@ -3286,7 +3351,7 @@ label_191e
 
 .player_no_collision
    ldx processing_entity_number
-   jmp label_1d7b
+   jmp clear_bit_3_on_entity_x_and_draw
 
 ; ---------------------------------------------------------------------   
    
@@ -3424,91 +3489,99 @@ spawn_player
 
 ; ------------------------------------------------------------------
    
-label_1a10
-      stx processing_entity_number
-   lda $4800, x
-      sta $fd
-      sta $02
-      ldy #$03
-      sty $fc
+
+.considering_facing = $fc
+.distance_countdown = $fd
+.max_distance = $02
+
+load_vision_buffers_entity_x
+   stx processing_entity_number
+   lda entity_data_ef, x
+   sta .distance_countdown
+   sta .max_distance
+   ldy #$03
+   sty .considering_facing
 
 label_1a1d
-      lda #$a0
+   lda #$a0
    sta $406d, y
-      lda #$00
-   sta $4065, y
+   lda #$00
+   sta vision_dist_seen_indir, y
    sta $4069, y
    sta $407f, y
-         dey
-      bpl label_1a1d
-      sta $42
-      ldx processing_entity_number
+   dey
+   bpl label_1a1d
+   sta $42
+   ldx processing_entity_number
    ldy entity_enemy_type, x
    lda $4083, y
-      bpl label_1a3e
-      inc $42
+   bpl .look_one_way
+   inc $42
 
-label_1a3e
-      ldx processing_entity_number
+.temp_x_coord = $03
+.temp_y_coord = $fb      
+      
+.look_one_way
+   ldx processing_entity_number
    lda entity_x_coords, x
-      sta temp_entity_x_coord
+   sta .temp_x_coord
    lda entity_y_coords, x
-      sta $fb
+   sta .temp_y_coord
 
-label_1a4a
-      ldy $fc
-      lda temp_entity_x_coord
-         clc
+.trace_distance_loop
+   ldy .considering_facing
+   lda .temp_x_coord
+   clc
    adc facing_offset_table_horz, y
    jsr wraparound_x_coordinate_a
-         tax
-      sta temp_entity_x_coord
-      lda $fb
-         clc
+   tax
+   sta .temp_x_coord
+   lda .temp_y_coord
+   clc
    adc facing_offset_table_vert, y
    jsr wraparound_y_coordinate_a
-         tay
-      sta $fb
+   tay
+   sta .temp_y_coord
    jsr read_a_from_screen_position_xy
-      ldx $fc
-   sta $4061, x
-   inc $4065, x
-   lda $4061, x
-      cmp #$20
-      bne label_1a7c
-      dec $fd
-      bne label_1a4a
-      beq label_1a8c
+   ldx .considering_facing
+   sta vision_char_seen_indir, x
+   inc vision_dist_seen_indir, x
+   lda vision_char_seen_indir, x
+   cmp #c_empty
+   bne .seen_something
+   dec .distance_countdown
+   bne .trace_distance_loop
+   beq .done_looking_this_way
 
-label_1a7c
-      cmp #$40
-      bcc label_1a8c
-      ldx temp_entity_x_coord
+.seen_something
+   cmp #$40
+   bcc .done_looking_this_way
+   ldx .temp_x_coord
    jsr read_a_from_screen_adjacant_buffer_position_xy
-      inc $42
-      ldx $fc
-   sta $40ae, x
+   inc $42
+   ldx .considering_facing
+   sta vision_nonwall_seen_indir, x
 
-label_1a8c
-      dec $fc
-      bmi label_1a97
-      lda $02
-      sta $fd
-   jmp label_1a3e
+.done_looking_this_way
+   dec .considering_facing
+   bmi .done_looking
+   lda .max_distance
+   sta .distance_countdown
+   jmp .look_one_way
 
-label_1a97
-      ldx processing_entity_number
-      lda $42
-      beq label_1aa1
-      lda #$20
-      sta $42
+.done_looking
+   ldx processing_entity_number
+   lda $42
+   beq label_1aa1
+   lda #$20
+   sta $42
 
 label_1aa1
    lda entity_color, x
-      and #$df
-      ora $42
+   and #$df              ; Clear bit 6
+   ora $42               ; But reset it, if $42 was set above
    sta entity_color, x
-         rts
+   rts
 
 ; ------------------------------------------------------------------
 
@@ -3536,6 +3609,8 @@ show_game_over
 
 ; --------------------------------------------------------------------   
    
+!zone output_93_and_jmp_0b30
+  
 output_93_and_jmp_0b30
    lda #$93
    jsr $ffd2
@@ -3689,7 +3764,7 @@ label_1b5f
    cmp #$12
    bne label_1b88
    lda entity_enemy_type, y
-   sta $4a00, x
+   sta entity_type_fired_me, x
 
 label_1b88
    lda entity_color, x
@@ -3928,31 +4003,33 @@ drop_spars_from_entity_x:
 
 ; --------------------------------------------------------------------   
    
-label_1d0a
+!zone end_of_level
+  
+end_of_level
    jsr clear_explosions
-    ldx #$01
+   ldx #$01
 
 label_1d0f
    ldy $1f15, x
-      lda p1_lives, x
-      beq label_1d3b
+   lda p1_lives, x
+   beq label_1d3b
    lda entity_spars_eaten, x
-         asl
-         asl
-         clc
+   asl
+   asl
+   clc
    adc entity_spars_eaten, x
-   adc $6045, y
-   sta $6045, y
-      lda #$00
+   adc player_1_score_digits+5, y
+   sta player_1_score_digits+5, y
+   lda #$00
    sta entity_spars_eaten, x
-      lda level_units_b
-      cmp level_units_c
-      bne label_1d3b
-         asl
-         asl
+   lda level_units_b
+   cmp level_units_c
+   bne label_1d3b
+   asl
+   asl
    adc $6044, y
-         sec
-      sbc #$04
+   sec
+   sbc #$04
    sta $6044, y
 
 label_1d3b
@@ -3969,11 +4046,12 @@ label_1d3b
 .no_level_tens_increase
    stx level_units_a
 
-label_1d4e
+.wait_for_f7
    jsr show_press_f7
-   bne label_1d4e
+   bne .wait_for_f7
+   
    jsr update_status_bar
-   jsr label_0ea7
+   jsr draw_new_map
    lda entity_shields
    sta p1_shields_copy
    lda p2_shields
@@ -3983,10 +4061,14 @@ label_1d4e
 
 ; -------------------------------------------------------------------   
    
+!zone move_forward_and_redraw_entity_x
+  
+.temp_x_store = $13
+
 move_forward_and_redraw_entity_x
-   stx $13
+   stx .temp_x_store
    jsr blank_out_entity_x_nondestructive
-   ldx $13
+   ldx .temp_x_store
    jsr propose_forward_move_coords_for_entity_x
    jsr copy_proposed_coords_to_actual_coords_entity_x
    jsr flip_top_bit_and_clear_third_bit_of_entity_x_status
@@ -3994,18 +4076,23 @@ move_forward_and_redraw_entity_x
 
 ; -------------------------------------------------------------------   
    
-label_1d7b
-      stx $13
+!zone clear_bit_3_on_entity_x_and_draw
+  
+.stored_x_value = $13
+clear_bit_3_on_entity_x_and_draw
+   stx .stored_x_value
    lda entity_status_byte, x
-      and #$fb
+   and #$fb  ; Clear bit 3
    sta entity_status_byte, x
    jsr flip_top_bit_and_clear_third_bit_of_entity_x_status
    jsr draw_entity_x
-      ldx $13
+   ldx .stored_x_value
    jmp draw_entity_x_override_color
 
 ; ---------------------------------------------------------------   
-   
+  
+!zone flip_bit_3_on_status_of_entity_x
+ 
 flip_bit_3_on_status_of_entity_x
    lda entity_status_byte, x
    eor #$04
@@ -4068,11 +4155,13 @@ label_1dc7
    jmp write_a_to_colors_position_xy
 
 ; --------------------------------------------------------------------   
-  
+!zone load_a_with_screen_at_entity_x_forward_coords
  
 load_a_with_screen_at_entity_x_forward_coords
    jsr propose_forward_move_coords_for_entity_x
 
+!zone load_a_with_screen_at_proposed_coords
+   
 load_a_with_screen_at_proposed_coords
    ldx proposed_entity_x_coord
    ldy proposed_entity_y_coord
@@ -4091,6 +4180,10 @@ init_player_x_shields_and_cooldowns
       sta player_fire_cooldown, x
       rts
  
+;------------------------------------------------------------------
+
+!zone post_code_data
+  
 msg_banner
 
 !text $93,$1C,"    CROSSROADS II : ",$9C,"PANDEMONIUM      " 
@@ -4117,7 +4210,12 @@ msg_banner
 !byte $20,$1E,$4C,$45,$56,$45,$4C,$20
 !byte $1C,$50,$4C,$41,$59,$45,$52,$20
 !byte $32,$20,$96,$53,$20,$9E,$4C,$00
-!byte $00,$00,$37,$6E,$A5,$02,$04,$05
+
+map_start_addresses:
+!byte $00,$00,$37,$6E,$A5
+
+map_colors:
+!byte $02,$04,$05
 !byte $06,$08,$09,$0B,$0E,$00,$00,$04
 !byte $FC,$04,$FC,$00,$00
 
@@ -4145,11 +4243,13 @@ joystick_offset_table:
 !byte $01       ; %1110, up
 !byte $80       ; %1111, idle
 
+onebit_masks_zero_is_msb:
+!byte $80,$40,$20,$10,$08,$04,$02 ; $01 is reused from the next array
 
+onebit_masks_zero_is_lsb:
+!byte $01,$02,$04,$08,$10,$20,$40,$80
 
-; This array is indexed into by startup loop.
-!byte $80,$40,$20,$10,$08,$04,$02,$01
-!byte $02,$04,$08,$10,$20,$40,$80,$04
+!byte $04
 !byte $05
 
 player_spawn_xcoord:
@@ -4163,8 +4263,10 @@ opposite_facing:
 !byte $01,$00,$03,$02
 
 player_spawn_facing:
-!byte $02,$03,$00
-!byte $08,$10
+!byte $02,$03
+
+label_1f15:
+!byte $00,$08,$10
 
 label_1f18:
 !byte $02,$05
@@ -4276,6 +4378,8 @@ game_over_message:
 
 press_f7_message:
 !byte $10,$12,$05,$13,$13,$00,$06,$37
+
+label_2006:
 !byte $FF,$BF,$E0,$20,$00,$FA,$AA,$A8
 !byte $20,$00,$AA,$FF,$EA,$80,$08,$AB
 !byte $FE,$8A,$80,$08,$AB,$BF,$88,$82
@@ -4303,7 +4407,10 @@ press_f7_message:
 !byte $00,$00,$01,$80,$00,$00,$00,$01
 !byte $FF,$BF,$F0,$00,$00,$EF,$AF,$E2
 !byte $02,$00,$BF,$BE,$DA,$00,$21,$AE
-!byte $BB,$D0,$08,$01,$FF,$FE,$00,$00
+!byte $BB,$D0,$08,$01
+
+label_20e2:
+!byte $FF,$FE,$00,$00
 !byte $20,$BB,$FA,$08,$80,$00,$23,$DE
 !byte $0B,$A0,$00,$82,$00,$0F,$A0,$00
 !byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -4331,5 +4438,8 @@ press_f7_message:
 !byte $20,$08,$0A,$00,$BE,$A0,$08,$08
 !byte $00,$FD,$BF,$D0,$00,$00,$AD,$7F
 !byte $D8,$10,$41,$BD,$75,$D8,$10,$41
+
+label_21be:
+
 
 !basic entry
