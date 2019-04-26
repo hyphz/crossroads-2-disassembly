@@ -1,15 +1,48 @@
 * = $0801
 
+DEFAULT_PLAYER_SHIELDS = 3
+DEFAULT_PLAYER_MOVE_COOLDOWN = 2
+DEFAULT_PLAYER_FIRE_COOLDOWN = 6
+POWEREDUP_PLAYER_MOVE_COOLDOWN = 1
+POWEREDUP_PLAYER_FIRE_COOLDOWN = 4
+SHIELD_SPAR_COLOR = 1
+FIRE_SPAR_COLOR = 2
+SPEED_SPAR_COLOR = 6
+
 c_empty = $20
 c_spar = $3f 
 c_player = $40
 
+dir_down = 0
+dir_up = 1
+dir_right = 2
+dir_left = 3
+
+et_egghead = 0
+et_vacuum = 1
+et_tagteam1 = 2
+et_tagteam2 = 3
+et_mutant = 4
+et_lemonshark = 5
+et_skull = 6
+et_chomper = 7
+et_monkey = 8
+et_rubberhead1 = 9
+et_thrower = 10
+et_archer = 11
+et_dog = 12
+et_rubberhead2 = 13
+et_flea = 14
+et_lion = 15
+et_player = 16
+et_bullet = 17
+et_worm = 18
+et_spear = 19
+
+
 ; Offset $7FF for BC4
 
  
- ; 1101 0000 1100 1101
- ;           ---- 1101 = $d00c    ?
-
 ; HARDWARE ADDRESSES
 
 !zone hardware_addresses
@@ -77,21 +110,22 @@ slot_udg_loaded_into  = $4096
 
 vision_char_seen_indir = $4061
 vision_dist_seen_indir = $4065
-vision_nonwall_seen_indir = $40ae
+ai_direction_votes     = $406d
+vision_entityId_seen_indir = $40ae
 
-entity_enemy_type     = $4100
+entity_enemy_type     = $4100        ; Index into enemy type lists.
 entity_base_charno    = $4200
-entity_bullet_type    = $4300
-entity_color          = $4400
+entity_bullet_type    = $4300        ; Type of bullet we fire. If MSB set, we _are_ a bullet.
+entity_color_and_flags= $4400
 entity_status_byte    = $4500
 entity_shields        = $4600
 p2_shields            = $4601
 entity_upd_cooldown   = $4700
-entity_data_ef        = $4800
+entity_vision_distance= $4800
 entity_data_cdlow     = $4900
 entity_type_fired_me  = $4a00
 entity_bullet_speed   = $4b00
-entity_x_unknown      = $4c00
+entity_score_awarded  = $4c00
 entity_upd_countdown  = $4d00
 entity_x_coords       = $4e00
 entity_y_coords       = $4f00
@@ -125,15 +159,16 @@ interrupt_counter                 = $46
 level_units_b                     = $47
 found_empty_entity_number         = $48
 player_move_cooldown_counter                     = $49
-level_units_c                     = $4b
+level_number_byte                     = $4b
 oldest_bullet_entity_id                             = $4c
 player_fire_cooldown_counter                     = $4e
 spars_spawned_by_0d33             = $6b
 var_e                             = $6c
+enemies_left_to_spawn             = $6e
 player_has_ticked                   = $a8
 player_move_cooldown              = $aa
-level_tens                        = $b0
-level_units_a                     = $b1
+level_bcd_tens                        = $b0
+level_bcd_units                     = $b1
 udg_slot_to_load_to               = $b9
 player_fire_cooldown                 = $be
 current_map_color                 = $c3
@@ -669,6 +704,7 @@ entry:
   sta self_mod_sta_base_address_hi   ; self modifying 
   lda #$03
   sta $06   ; Unused position in zero page
+  
 
  
 ; Accumulate several arrays in screen space??
@@ -930,7 +966,7 @@ label_0b24
  sta $0315
  cli ;and restart interrupts
 
-label_0b30
+title_screen_init
    jsr clear_explosions
    ldx #$07
    stx var_f_init_12
@@ -952,12 +988,12 @@ label_0b48
   bne label_0b48
   sta $ae
   sta $af
-  sta level_tens
+  sta level_bcd_tens
   dex
   stx level_x4_p70
   lda #$0a
-  sta level_units_c
-  sta level_units_a
+  sta level_number_byte
+  sta level_bcd_units
   lda #<msg_banner
   ldy #>msg_banner
   jsr output_string_at_yyaa_until_zero_or_quote
@@ -1013,7 +1049,7 @@ label_0ba8
       ldx pressed_key_code
       cpx #$03
       bne label_0bbf
-   jmp label_0b30
+   jmp title_screen_init
 
 label_0bbf
    lda $eb81, x                 ; Unshifted character table?
@@ -1109,9 +1145,9 @@ label_0c2b
    lda screen+$223  ; Digit of level to start at
    sec
    sbc #$30         ; Subtract PETSCII offset to get actual number
-   sta level_units_a
+   sta level_bcd_units
    sta level_units_b
-   sta level_units_c
+   sta level_number_byte
    lda #$9d         ; Display top status line
    ldy #$1e
    jsr output_string_at_yyaa_until_zero_or_quote
@@ -1128,21 +1164,24 @@ label_0c2b
    jsr draw_new_map
    jsr update_status_bar
 
-label_0c6c
+per_level_init
+
+   ; Clear shields to 0 on all entities.
    lda #$00
    tax
-
-label_0c6f
+.loop_clear_shields
    sta entity_shields, x
    inx
-   bne label_0c6f
+   bne .loop_clear_shields
+   
+   
    sta var_a_init_zero
    sta spars_spawned_by_0d33
    lda #$02
    sta oldest_bullet_entity_id
    sta var_d
    sta var_e
-   lda level_units_c
+   lda level_number_byte
    asl
    asl
    clc
@@ -1178,7 +1217,7 @@ spawn_initial_spars
    jsr set_xy_to_random_empty_space_coord
    lda #c_spar
    jsr write_a_to_screen_position_xy
-   lda #$01          ; Spar type. Initial ones are always shield
+   lda #SHIELD_SPAR_COLOR         ; Spar type. Initial ones are always shield
    jsr write_a_to_colors_position_xy
    dec .initial_spars_to_spawn
    bne .spawn_initial_spars_loop
@@ -1214,14 +1253,14 @@ label_0cdc
    and #$01
    tax
    tya
-   cmp $1f05, x
+   cmp label_1f05, x
    bne game_loop
    lda p1_lives, x
    beq game_loop
-   inc $1f18, x
-   lda $1f18, x
+   inc label_1f18, x
+   lda label_1f18, x
    ora #$20
-   sta entity_color, x
+   sta entity_color_and_flags, x
    jsr draw_entity_x
    jmp wait_16jiffies
 
@@ -1559,8 +1598,8 @@ draw_new_map
    
    lda #$00
    sta $bb
-   ldx level_units_a
-   lda level_tens
+   ldx level_bcd_units
+   lda level_bcd_tens
    bne label_0ed2
    cpx #$05
    bcc label_0ee2
@@ -1685,10 +1724,10 @@ update_status_bar_not_scores:
    lda p2_lives       ; Player 2 lives
    adc #$30
    sta screen+78  
-   lda level_tens
+   lda level_bcd_tens
    adc #$30
    sta screen+63  ; Level tens
-   lda level_units_a
+   lda level_bcd_units
    adc #$30 
    sta screen+64  ; Level units
 
@@ -1773,7 +1812,7 @@ write_a_to_screen_entityId_buffer_position_xy
    lda #$9d                ; STA absolute, x
    !byte $2c               ; BIT skipping hack
    
-read_a_from_screen_adjacant_buffer_position_xy
+read_a_from_entityId_buffer_position_x_y
    lda #$bd                ; LDA absolute, x
     
    sta .selfmod_instruction2
@@ -1837,7 +1876,7 @@ label_1035:
 label_1041:
   lda $66, x
   beq label_1098
-  ldy $1f38, x
+  ldy label_1f38, x
   cmp #05
   bcc label_1067
   bne label_1054
@@ -1862,11 +1901,11 @@ label_105e:
  label_1067:
   tax
   lda sid_voice3_oscillator_ro
-  and $1f41, x
+  and label_1f41, x
   clc
-  adc $1f3d, x
+  adc label_1f3d, x
   sta $8f
-  lda $1f39, x
+  lda label_1f39, x
   tax
   lda $8f 
   
@@ -1924,11 +1963,11 @@ label_10c0:
   ldx #$02
 label_10cf:
   stx $ca
-  ldy $1f15, x
+  ldy multiply_by_8, x
   ldx #$07
 
 label_10d6:
-  lda $1f20, y
+  lda spar_images, y
   sta $29f8, x
   iny
   dex
@@ -2042,28 +2081,31 @@ reset_entity_count_and_udgs
   lda sid_voice3_oscillator_ro
   and #$1f
   adc #$28
-  sta $6e
+  sta enemies_left_to_spawn
   rts
          
 ; -------------------------------------------------------------------         
 
-label_118a
+!zone spawn_enemy_maybe
+  
+
+spawn_enemy_maybe
    lda sid_voice3_oscillator_ro
    and #$0f
    tax
-   lda level_units_c
+   lda level_number_byte
    cmp enemy_release_schedule, x
-   bcc label_118a
+   bcc spawn_enemy_maybe
    lda slot_udg_loaded_into, x
    bpl label_11dc
    lda udg_slot_to_load_to
    cmp #$0a
    bcc label_11bd
-   bne label_118a
+   bne spawn_enemy_maybe
    cpx #$03
-   beq label_118a
+   beq spawn_enemy_maybe
    cpx #$04
-      beq label_118a
+      beq spawn_enemy_maybe
    lda $4099
       bmi label_11bd
    lda $4098
@@ -2079,8 +2121,8 @@ label_11bd
       stx udg_number_to_load
    jsr load_udg_localvars
       ldx udg_number_to_load
-      lda level_units_c
-   cmp $1fe2, x
+      lda level_number_byte
+   cmp label_1fe2, x
       bcc label_11dc
    lda sid_voice3_oscillator_ro
       and #$03
@@ -2099,13 +2141,13 @@ label_11dc
       lda udg_number_to_load
       cmp #$0c
       bne label_120f
-      lda level_units_c
+      lda level_number_byte
       cmp #$14
       bcc label_120f
       lda #$02
    sta entity_upd_cooldown, x
       lda #$49
-   sta entity_color, x
+   sta entity_color_and_flags, x
       lda #$05
    sta entity_shields, x
       lda #$18
@@ -2133,13 +2175,19 @@ erase_entity_x_from_screen:
 
 ; --------------------------------------------------------------------   
    
-!zone fire_player_spawn_bullets
+; Fire the two bullets which appear when a player spawns.
+
+!zone fire_player_spawn_bullets_from_player_y
   
 .temp_y_store = $0f
-fire_player_spawn_bullets
-   sty .temp_y_store
-   lda #$01
+fire_player_spawn_bullets_from_player_y
+   sty .temp_y_store          ; Store player number
+   
+   ; Fire the first bullet, which always goes upwards.
+   lda #dir_up
    jsr fire_bullet_from_entity_y_in_direction_a
+   
+   ; Fire the second bullet, which goes the way the player starts.
    ldy .temp_y_store
    lda player_spawn_facing, y
    jmp fire_bullet_from_entity_y_in_direction_a
@@ -2191,13 +2239,11 @@ color_to_write = $fc
 !zone draw_entity_x 
   
 draw_entity_x:
-   lda entity_color, x
+   lda entity_color_and_flags, x
    sta color_to_write
 
-
-   
 draw_entity_x_override_color:
-   lda entity_color, x
+   lda entity_color_and_flags, x
    and #$20
    bne label_1279
    lda #$00
@@ -2243,7 +2289,6 @@ draw_second_half_of_midsquare_entity_x:
 ; --------------------------------------------------------------------
 
 !zone write_scrn_char_side_from_localvars_to_entity_x_coords
-  
   
 write_scrn_char_side_from_localvars_to_entity_x_coords
    lda entity_y_coords, x
@@ -2349,7 +2394,7 @@ label_133b
       ldy $0a
    lda entity_shields, y
       bne label_1359
-   lda entity_x_unknown, y
+   lda entity_score_awarded, y
       bne label_1361
 
 label_1359
@@ -2361,17 +2406,17 @@ label_1359
 label_1361
    sta $4038, x
       ldy $fc
-   lda $1f1a, y
+   lda label_1f1a, y
    sta explosion_sprite_pointer_offset, x
    lda sid_voice3_oscillator_ro
       and #$01
          tay
-   lda $1f09, y
+   lda label_1f09, y
    sta explosion_base_sprite_pointer, x
       lda $fe
    sta exploding_entity_index, x
          tay
-   lda entity_color, y
+   lda entity_color_and_flags, y
    sta vic_sprite_color_array, x
    lda entity_status_byte, y
       bmi label_138d
@@ -2524,7 +2569,7 @@ load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
    tay
    sta entity_enemy_type, x
    lda enemy_type_colors, y
-   sta entity_color, x
+   sta entity_color_and_flags, x
    lda enemy_initial_status, y
    sta entity_status_byte, x
    lda enemy_data_a, y
@@ -2541,7 +2586,7 @@ load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
    lsr
    lsr
    sta entity_bullet_speed, x
-   lda enemy_shields_and_xval, y
+   lda enemy_data_low_shields_high_score, y
    pha
    and #$0f
    sta entity_shields, x
@@ -2550,11 +2595,11 @@ load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
    lsr
    lsr
    lsr
-   sta entity_x_unknown, x
-   lda enemy_data_ef, y
+   sta entity_score_awarded, x
+   lda enemy_data_low_vision_high_update_cooldown, y
    pha
    and #$0f
-   sta entity_data_ef, x
+   sta entity_vision_distance, x
    pla
    lsr
    lsr
@@ -2595,13 +2640,15 @@ blank_out_entity_x_nondestructive
 
 ; --------------------------------------------------------------------
    
-label_14b8
-   lda entity_x_unknown, y
-   ldy $1f15, x
-         clc
-   adc $6045, y
-   sta $6045, y
-   jsr label_14cb
+!zone give_player_x_score_for_entity_y
+  
+give_player_x_score_for_entity_y
+   lda entity_score_awarded, y
+   ldy multiply_by_8, x
+   clc
+   adc player_1_score_digits+5, y
+   sta player_1_score_digits+5, y
+   jsr score_update
    jmp update_status_bar
    
 ; ---------------------------------------------------------------------
@@ -2611,12 +2658,12 @@ label_14b8
 .saved_player_number = $07
 .current_rollover_digit = $fc  
 
-label_14cb
+score_update
    stx .saved_player_number
    lda #$05
    sta .current_rollover_digit  
    clc
-   adc $1f15, x
+   adc multiply_by_8, x
    tax
 
 .bcd_rollover_loop
@@ -2638,7 +2685,7 @@ label_14cb
    
    
    ldx .saved_player_number
-   ldy $1f15, x
+   ldy multiply_by_8, x
    lda $6043, y
    lsr
    cmp $ae, x
@@ -2688,12 +2735,12 @@ label_152a
 ; ---------------------------------------------------------------------         
          
 label_152d
-   lda $6e
+   lda enemies_left_to_spawn
    beq label_153a
-   jsr label_118a
+   jsr spawn_enemy_maybe
    lda $8e
    bmi done_enemy_update
-   dec $6e
+   dec enemies_left_to_spawn
 
 label_153a
    lda sid_voice3_oscillator_ro
@@ -2701,7 +2748,7 @@ label_153a
    lda sid_voice3_oscillator_ro
    cmp level_x4_p70
    bcs done_enemy_update
-   jsr label_118a
+   jsr spawn_enemy_maybe
 
 done_enemy_update
       inc var_f_init_12
@@ -2752,62 +2799,71 @@ label_1587
    
    
 label_158f
-   lda entity_bullet_type, x
-   bpl label_15c4
+   lda entity_bullet_type, x     ; Check if we are a bullet, or a monster.
+   bpl .creature_ai              ; If we're a monster, go do smarter stuff.
 
 .stored_entity_number = $13   
    
-label_1594
+; We are a bullet.
+
+update_bullet:
    stx .stored_entity_number
    jsr load_a_with_screen_at_entity_x_forward_coords
    ldx .stored_entity_number
-   cmp #c_empty
-   bne label_15a2
-   jmp clear_bit_3_on_entity_x_and_draw  
+   cmp #c_empty                 ; Are we moving into empty space?
+   bne .bullet_hit_something    ; No?
+   jmp clear_bit_3_on_entity_x_and_draw ; If we are, just move forward.  
 
-label_15a2
+.bullet_hit_something
    ldy entity_bullet_type, x
-   bmi label_15ad
-   dec var_d
+   bmi label_15ad                 ;??
+   dec var_d            
    bne label_15ad
    inc var_d
 
 label_15ad
-      cmp #$40
-      bcc label_15bc
+   cmp #c_player
+   bcc .bullet_hit_wall
    jsr blank_out_entity_x_nondestructive
    ldx .stored_entity_number
    jsr set_0a_and_y_to_entityid_that_x_collides_with
    jmp label_1bfb
 
-label_15bc
-      lda #$00
+   
+; If a bullet hit a wall, just kill it - set shields to 0 and delete it from the screen.
+  
+.bullet_hit_wall
+   lda #$00
    sta entity_shields, x
    jmp blank_out_entity_x_nondestructive
 
-label_15c4
+; -----   
+   
+.creature_ai
    jsr load_vision_buffers_entity_x
-      ldy #$03
+   ldy #dir_left
 
-label_15c9
-      ldx var_f_init_12
+.check_direction_y
+   ldx var_f_init_12
    lda vision_char_seen_indir, y
-      cmp #$3f
-      bcc label_15e0
-      cmp #$40
-      bcs label_15e6
-   lda entity_color, x
-      and #$10
-      beq label_15e0
+   cmp #c_spar
+   bcc label_15e0
+   cmp #c_player
+   bcs label_15e6
+   lda entity_color_and_flags, x
+   and #$10
+   beq label_15e0
    jsr label_17e9
 
 label_15e0
-         dey
-      bpl label_15c9
+   dey
+   bpl .check_direction_y
+   
+   
    jmp label_1673
 
 label_15e6
-   ldx vision_nonwall_seen_indir, y
+   ldx vision_entityId_seen_indir, y
    lda entity_enemy_type, x
       cmp #$11
       bcc label_1609
@@ -2842,15 +2898,15 @@ label_161a
       beq label_15e0
          tya
          tax
-   inc $406d, x
+   inc ai_direction_votes, x
    jsr label_1820
    jsr label_1820
    jmp label_15e0
 
 label_1634
-   ldx vision_nonwall_seen_indir, y
+   ldx vision_entityId_seen_indir, y
    lda entity_enemy_type, x
-      cmp #$01
+      cmp #et_vacuum
       bne label_1648
    lda entity_facing, x
          tax
@@ -2860,7 +2916,7 @@ label_1634
 
 label_1648
       ldx var_f_init_12
-   lda entity_color, x
+   lda entity_color_and_flags, x
       bpl label_1656
 
 label_164f
@@ -2869,7 +2925,7 @@ label_164f
       bne label_1660
 
 label_1656
-   lda entity_color, x
+   lda entity_color_and_flags, x
       and #$40
       beq label_1660
    jsr label_17e9
@@ -2889,51 +2945,55 @@ label_1673
    lda entity_facing, x
          tax
          tay
-   inc $406d, x
+   inc ai_direction_votes, x
    ldx opposite_facing, y
-   dec $406d, x
-   dec $406d, x
+   dec ai_direction_votes, x
+   dec ai_direction_votes, x
    jsr label_1820
 
 label_1689
    jsr label_1820
 
-label_168c
-      ldy #$03
-      sty $0e
-   lda $406d, y
-         dey
-      sta $fd
+.best_direction = $0e  
+.most_direction_votes = $fd   
+   
+.find_best_direction
+   ldy #$03
+   sty .best_direction
+   lda ai_direction_votes, y
+   dey
+   sta .most_direction_votes
 
-label_1696
-   lda $406d, y
-      cmp $fd
-      bcc label_16a3
-      beq label_1689
-      sta $fd
-      sty $0e
+.find_best_direction_loop
+   lda ai_direction_votes, y
+   cmp .most_direction_votes
+   bcc label_16a3
+   beq label_1689
+   sta .most_direction_votes
+   sty .best_direction
 
 label_16a3
-         dey
-      bpl label_1696
-      ldy $0e
+   dey
+   bpl .find_best_direction_loop
+   
+   ldy .best_direction
    lda vision_dist_seen_indir, y
-      cmp #$01
-      bne label_16c6
+   cmp #$01
+   bne .nothing_adjacent
    lda vision_char_seen_indir, y
-      beq label_16c3
-      cmp #$1b
-      bcc label_16c3
-      cmp #$3f
-      bcs label_16c6
-      lda #$01
-   sta $406d, y
-      bne label_168c
+   beq label_16c3
+   cmp #$1b
+   bcc label_16c3
+   cmp #c_spar
+   bcs .nothing_adjacent
+   lda #$01
+   sta ai_direction_votes, y
+   bne .find_best_direction
 
 label_16c3
    jmp label_17d9
 
-label_16c6
+.nothing_adjacent
       ldy #$03
 
 label_16c8
@@ -2961,7 +3021,7 @@ label_16e8
       cmp #$01
       beq label_174e
    lda entity_enemy_type, x
-      cmp #$01
+      cmp #et_vacuum
       bne label_174b
    lda vision_char_seen_indir, y
       cmp #$40
@@ -2969,7 +3029,7 @@ label_16e8
       lda #$03
    sta entity_upd_countdown, x
    sta entity_upd_cooldown, x
-   ldx vision_nonwall_seen_indir, y
+   ldx vision_entityId_seen_indir, y
    lda entity_facing, x
       sta $0a
          tay
@@ -3014,7 +3074,7 @@ label_174e
    inc entity_spars_eaten, x
    inc entity_shields, x
    lda entity_enemy_type, x
-      cmp #$06
+      cmp #et_skull
       bne label_1767
       lda #$03
    sta entity_upd_cooldown, x
@@ -3032,7 +3092,7 @@ label_1770
 label_1775
    lda $4069, y
       bne label_1794
-   lda vision_nonwall_seen_indir, y
+   lda vision_entityId_seen_indir, y
       sta $0a
       stx entity_number_that_hit_player
    jsr label_1bfb
@@ -3045,13 +3105,13 @@ label_1775
       bne label_17d9
 
 label_1794
-   ldx vision_nonwall_seen_indir, y
+   ldx vision_entityId_seen_indir, y
    lda entity_enemy_type, x
-      cmp #$03
+      cmp #et_tagteam2
       bne label_17d9
       ldx var_f_init_12
    lda entity_enemy_type, x
-      cmp #$04
+      cmp #et_mutant
       bne label_17d9
    lda entity_spars_eaten, x
          pha
@@ -3060,7 +3120,7 @@ label_1794
       sty $0a
    jsr blank_out_entity_x_nondestructive
       ldy $0a
-   ldx vision_nonwall_seen_indir, y
+   ldx vision_entityId_seen_indir, y
    lda entity_status_byte, x
       and #$80
          pha
@@ -3091,8 +3151,8 @@ label_17e9
          sec
    sbc vision_dist_seen_indir, y
          clc
-   adc $406d, y
-   sta $406d, y
+   adc ai_direction_votes, y
+   sta ai_direction_votes, y
 
 label_17f6
          rts
@@ -3104,10 +3164,10 @@ label_17f7
    sec
    sbc vision_dist_seen_indir, y  ; a = 40-(4065 entry)
    sta temp_entity_x_coord       ; $03 = 40-(4065 entry)
-   lda $406d, y  ; a = (406d entry)
+   lda ai_direction_votes, y  ; a = (406d entry)
    sec
    sbc temp_entity_x_coord       ; a = (406d entry)-40-(4065 entry)
-   sta $406d, y
+   sta ai_direction_votes, y
    rts
 
 ; ------------------------------------------------------------------         
@@ -3132,7 +3192,7 @@ label_1811
 label_1820
    jsr load_two_low_bits_of_osc3_to_accumulator
          tax
-   inc $406d, x
+   inc ai_direction_votes, x
          rts
 
 label_1828
@@ -3292,7 +3352,7 @@ label_18c4
    bcc .player_walked_into_solid   ; Treat them as a wall.
    
    lda entity_enemy_type, y
-   cmp #$0c
+   cmp #et_dog
    beq .player_walked_into_solid
    cpy #$0c
    bcs label_190f
@@ -3307,7 +3367,7 @@ label_190f
    lda entity_shields, y
       bne label_191e
       ldx entity_number_that_hit_player
-   jmp label_14b8
+   jmp give_player_x_score_for_entity_y
 
 label_191e
          rts
@@ -3315,16 +3375,16 @@ label_191e
 .player_collected_spar
    inc entity_spars_eaten, x
    lda .color_of_entered_space
-   cmp #$01
+   cmp #SHIELD_SPAR_COLOR
    beq .player_collected_shield_spar
-   cmp #$06
+   cmp #SPEED_SPAR_COLOR
    beq .player_collected_speed_spar
-   lda #$04                   ; Effect of a type 2 spar??
+   lda #POWEREDUP_PLAYER_FIRE_COOLDOWN              ; Fire spar collected
    sta player_fire_cooldown, x
    bne .player_collected_shield_spar
 
 .player_collected_speed_spar
-   lda #$01
+   lda #POWEREDUP_PLAYER_MOVE_COOLDOWN
    sta player_move_cooldown, x
 
 .player_collected_shield_spar
@@ -3436,7 +3496,7 @@ reduce_player_x_lives
    jsr init_player_x_shields_and_cooldowns
    
 spawn_player
-  lda level_units_c
+  lda level_number_byte
   lsr
   sta $3f
   stx processing_entity_number
@@ -3449,9 +3509,9 @@ spawn_player
   lda #$01
   sta player_move_cooldown_counter, x
   sta player_fire_cooldown_counter, x
-  lda $1f18, x
+  lda label_1f18, x
   ora #$20
-  sta entity_color, x
+  sta entity_color_and_flags, x
   lda player_spawn_xcoord, x
   sta proposed_entity_x_coord
   lda #$17
@@ -3482,7 +3542,7 @@ spawn_player
 
 .player_spawn_clear
    ldy processing_entity_number
-   jsr fire_player_spawn_bullets
+   jsr fire_player_spawn_bullets_from_player_y
 
 .player_dead_dead
    jmp update_status_bar_not_scores   ; Tail call RTS
@@ -3490,13 +3550,15 @@ spawn_player
 ; ------------------------------------------------------------------
    
 
+!zone load_vision_buffers_entity_x
+
 .considering_facing = $fc
 .distance_countdown = $fd
 .max_distance = $02
 
 load_vision_buffers_entity_x
    stx processing_entity_number
-   lda entity_data_ef, x
+   lda entity_vision_distance, x
    sta .distance_countdown
    sta .max_distance
    ldy #$03
@@ -3504,7 +3566,7 @@ load_vision_buffers_entity_x
 
 label_1a1d
    lda #$a0
-   sta $406d, y
+   sta ai_direction_votes, y
    lda #$00
    sta vision_dist_seen_indir, y
    sta $4069, y
@@ -3557,10 +3619,10 @@ label_1a1d
    cmp #$40
    bcc .done_looking_this_way
    ldx .temp_x_coord
-   jsr read_a_from_screen_adjacant_buffer_position_xy
+   jsr read_a_from_entityId_buffer_position_x_y
    inc $42
    ldx .considering_facing
-   sta vision_nonwall_seen_indir, x
+   sta vision_entityId_seen_indir, x
 
 .done_looking_this_way
    dec .considering_facing
@@ -3577,22 +3639,22 @@ label_1a1d
    sta $42
 
 label_1aa1
-   lda entity_color, x
+   lda entity_color_and_flags, x
    and #$df              ; Clear bit 6
    ora $42               ; But reset it, if $42 was set above
-   sta entity_color, x
+   sta entity_color_and_flags, x
    rts
 
 ; ------------------------------------------------------------------
 
 !zone show_game_over
   
-show_game_over
+show_game_over:
 
 ; Draw game over message on screen. Make it flash by copying value
 ; of jiffy clock into color map at location of message.
 
-   ldx #$08
+   ldx #$08                   ; Length of message
 .game_over_print_loop
    lda game_over_message, x
    beq .game_over_skip_letter
@@ -3604,17 +3666,13 @@ show_game_over
    bpl .game_over_print_loop
    
    jsr show_press_f7
-   beq output_93_and_jmp_0b30
+   beq .game_over_f7_pressed
    jmp label_0d1b
-
-; --------------------------------------------------------------------   
-   
-!zone output_93_and_jmp_0b30
-  
-output_93_and_jmp_0b30
-   lda #$93
-   jsr $ffd2
-   jmp label_0b30
+ 
+.game_over_f7_pressed
+   lda #$93              ; Clear screen
+   jsr $ffd2             ; OS print character call
+   jmp title_screen_init
 
 ; ---------------------------------------------------------------   
    
@@ -3646,7 +3704,7 @@ update_player_bullets:
    jmp label_1af2
 
 label_1aef
-   jsr label_1594
+   jsr update_bullet
 
 label_1af2
    ldx $13
@@ -3680,7 +3738,7 @@ set_0a_and_y_to_entityid_that_x_overlaps
   tax
 
 label_1b0e
-  jsr read_a_from_screen_adjacant_buffer_position_xy
+  jsr read_a_from_entityId_buffer_position_x_y
   tay
   ldx .tempstore_x
   sty $0a
@@ -3767,10 +3825,10 @@ label_1b5f
    sta entity_type_fired_me, x
 
 label_1b88
-   lda entity_color, x
+   lda entity_color_and_flags, x
    and #$f0
-   ora entity_color, y
-   sta entity_color, x
+   ora entity_color_and_flags, y
+   sta entity_color_and_flags, x
    lda entity_status_byte, y
    and #$40
    beq label_1b9f
@@ -3834,17 +3892,18 @@ label_1bf8
  ; --------------------------------------------------------------------
 label_1bfb
 
-.entity_number_hit = $0a 
+.first_colliding_entity = $09
+.second_colliding_entity = $0a
 
 ; $0a = entity type that hit
 ; $09 = entity number that hit 
 ; x = entity that was hit (player?)
 
-   ldy .entity_number_hit
+   ldy .second_colliding_entity
    lda entity_bullet_type, y
-   cmp #$12
+   cmp #et_worm
    bne label_1c33
-   ldx entity_number_that_hit_player
+   ldx .first_colliding_entity
    lda entity_status_byte, x
    and #esb_invulnerable
    beq label_1c33
@@ -3862,18 +3921,18 @@ label_1bfb
    ldy entity_facing, x
    lda opposite_facing, y
    sta entity_facing, x
-      lda #$01
-      ldx entity_number_that_hit_player
+   lda #$01
+   ldx .first_colliding_entity
    ldy entity_bullet_type, x
    jmp sound_related_something           ; EXIT
 
 label_1c33
-   ldx .entity_number_hit
+   ldx .second_colliding_entity
    dec entity_shields, x
    lda #$01
    jsr explode_entity_maybe
    ldy #$03
-   ldx entity_number_that_hit_player
+   ldx .first_colliding_entity
    lda entity_status_byte, x
    and #esb_invulnerable
    beq label_1c4c
@@ -3884,8 +3943,8 @@ label_1c4c
    ldy #$07
    sty $0b
    lda entity_enemy_type, x
-   cmp #$01
-   beq label_1c67
+   cmp #et_vacuum
+   beq .vacuum_instant_death
    lda entity_bullet_type, x
    bmi label_1c7c
    cmp #$02
@@ -3894,11 +3953,11 @@ label_1c4c
    cmp #$02
    bcc label_1c7c
 
-label_1c67
-      ldx .entity_number_hit
+.vacuum_instant_death
+      ldx .second_colliding_entity
       lda #$00
    sta entity_shields, x
-      beq label_1c7c
+      beq label_1c7c             ;; ??
    lda entity_status_byte, x
       and #esb_invulnerable
       beq label_1c7c
@@ -3906,76 +3965,76 @@ label_1c67
    jsr explode_entity_maybe
 
 label_1c7c
-      ldx .entity_number_hit
+   ldx .second_colliding_entity
    lda entity_shields, x
-      bne label_1c95
-      lda $0b
-      cmp #$07
-      beq label_1c8d
-      lda #$02
-      sta $0b
+   bne .second_entity_survived
+   lda $0b
+   cmp #$07
+   beq label_1c8d
+   lda #$02
+   sta $0b
 
 label_1c8d
    jsr blank_out_entity_x_nondestructive
-      ldx $0a
+   ldx .second_colliding_entity
    jsr drop_spars_from_entity_x
 
-label_1c95
-   ldx entity_number_that_hit_player
+.second_entity_survived
+   ldx .first_colliding_entity
    lda entity_shields, x
-   bne label_1ca4
+   bne .first_entity_survived
    jsr blank_out_entity_x_nondestructive
-   ldx entity_number_that_hit_player
+   ldx .first_colliding_entity
    jsr drop_spars_from_entity_x
 
-label_1ca4
-   ldx entity_number_that_hit_player
+.first_entity_survived
+   ldx .first_colliding_entity
    cpx #$02
-   bcs label_1cb7
+   bcs .first_entity_wasnt_player
    jsr update_status_bar_just_shields
    lda entity_shields, x
-      bmi label_1cb4
-      bne label_1cb7
+   bmi .player_life_lost
+   bne .first_entity_wasnt_player    ;
 
-label_1cb4
+.player_life_lost
    jmp reduce_player_x_lives
 
-label_1cb7
+.first_entity_wasnt_player
    lda entity_bullet_type, x
-      cmp #$02
-      bcs label_1cc9
-      ldy $0a
+   cmp #$02
+   bcs label_1cc9
+   ldy $0a
    ldx entity_shields, y
-      bne label_1cc9
-         tax
-   jsr label_14b8
+   bne label_1cc9
+   tax
+   jsr give_player_x_score_for_entity_y
 
 label_1cc9
       ldy #$02
-      ldx entity_number_that_hit_player
+      ldx .first_colliding_entity
       cpx #$0c
       bcs label_1cd2
          dey
 
 label_1cd2
-      ldx $0a
+      ldx .second_colliding_entity
       cpx #$0c
       bcs label_1cd9
          dey
 
 label_1cd9
-      lda $0b
+   lda $0b
    jsr sound_related_something
-      ldx $0a
-      cpx #$02
-      bcs reused_rts
+   ldx .second_colliding_entity
+   cpx #$02
+   bcs reused_rts
    jsr update_status_bar_just_shields
    lda entity_shields, x
-      beq label_1cb4
-      bmi label_1cb4
+   beq .player_life_lost
+   bmi .player_life_lost
 
 reused_rts
-         rts
+   rts
 
 ; --------------------------------------------------------------------         
          
@@ -4009,22 +4068,30 @@ end_of_level
    jsr clear_explosions
    ldx #$01
 
-label_1d0f
-   ldy $1f15, x
-   lda p1_lives, x
-   beq label_1d3b
-   lda entity_spars_eaten, x
-   asl
-   asl
+.check_player_x
+   ldy multiply_by_8, x
+   
+   ; Check if player x is active/alive; don't process if not.
+   lda p1_lives, x            ; Check if player is alive/active.
+   beq .player_x_dead         ; If not, don't process.
+   
+   ; Award players points equal to number of spars they ate x5.
+   lda entity_spars_eaten, x  ; Get number of spars they ate
+   asl                        ; x2
+   asl                        ; x4
    clc
-   adc entity_spars_eaten, x
-   adc player_1_score_digits+5, y
+   adc entity_spars_eaten, x  ; Add once more for x5
+   adc player_1_score_digits+5, y  ; Add this to player's score
    sta player_1_score_digits+5, y
+   
+   ; Reset player's spars eaten count for the new level.
    lda #$00
    sta entity_spars_eaten, x
+   
+   
    lda level_units_b
-   cmp level_units_c
-   bne label_1d3b
+   cmp level_number_byte
+   bne .player_x_dead
    asl
    asl
    adc $6044, y
@@ -4032,20 +4099,22 @@ label_1d0f
    sbc #$04
    sta $6044, y
 
-label_1d3b
-   jsr label_14cb
-         dex
-      bpl label_1d0f
-   ldx level_units_a
-   inx
-   cpx #10
-   bcc .no_level_tens_increase
-   ldx #$00
-   inc level_tens
+.player_x_dead
+   jsr score_update
+   dex
+   bpl .check_player_x
+   
+   ; Increment level
+   ldx level_bcd_units           ; Get level units           
+   inx                         ; Add 1
+   cpx #10                     ; Did it go over 10?
+   bcc .no_level_bcd_tens_increase ; No, so no carry
+   ldx #$00                    ; Carry, set units to 0
+   inc level_bcd_tens              ; And carry 1 to the tens
+.no_level_bcd_tens_increase
+   stx level_bcd_units           ; Store new units
 
-.no_level_tens_increase
-   stx level_units_a
-
+   ; Wait for user to press F7.
 .wait_for_f7
    jsr show_press_f7
    bne .wait_for_f7
@@ -4056,8 +4125,8 @@ label_1d3b
    sta p1_shields_copy
    lda p2_shields
    sta p2_shields_copy
-   inc level_units_c
-   jmp label_0c6c
+   inc level_number_byte
+   jmp per_level_init
 
 ; -------------------------------------------------------------------   
    
@@ -4106,8 +4175,7 @@ flip_bit_3_on_status_of_entity_x
 ; Shows the "Press F7" message. Also checks if F7 is actually being
 ; pressed and sets eq flag accordingly.
   
-show_press_f7
-   
+show_press_f7  
    ldx #$07                         ; 7 characters
 .print_pressf7_loop
    lda press_f7_message, x          ; Get character of "PRESS F7"
@@ -4125,9 +4193,9 @@ show_press_f7
 
 ; --------------------------------------------------------------------
 
-; Choose a random one from 3 types for a newly spawned spar. Called
+; Choose a random type (color) for a newly spawned spar. Called
 ; directly after spawning a spar with x/y still holding its location.
-; New feature in Crossroads 2 so was probably added in?   
+; 3/4 chance of a shield spar. Otherwise, 50/50 fire or move spar.
 
 !zone select_random_spar_type      
          
@@ -4138,20 +4206,19 @@ select_random_spar_type
    bne .select_shield_spar        ; If not 0 (3/4), shield spar.
    ; If level too low, always shield spar.
    lda #$02                       ; If level too low, always shield spar.
-   cmp level_units_c
+   cmp level_number_byte
    bcs .select_shield_spar       
    ; Select 50/50 between other two spar types.
    lda sid_voice3_oscillator_ro   ; Get random value from osc
    and #$01                       ; Mask off just one bit
-   beq label_1dc7                 ; If zero, spar type 6
-   lda #$02                       ; Else, spar type 2
+   beq .select_speed_spar                ; If zero, spar type 6
+   lda #FIRE_SPAR_COLOR                       ; Else, spar type 2
    !byte $2c              ; BIT skip hack
-label_1dc7
-   lda #$06
+.select_speed_spar
+   lda #SPEED_SPAR_COLOR
    !byte $2c              ; BIT skip hack
 .select_shield_spar
-   lda #$01
-   
+   lda #SHIELD_SPAR_COLOR
    jmp write_a_to_colors_position_xy
 
 ; --------------------------------------------------------------------   
@@ -4171,14 +4238,16 @@ load_a_with_screen_at_proposed_coords
 
 !zone init_player_x_shields_and_cooldowns
   
+; Reset player x's shield and move/fire cooldown value to the default.
+  
 init_player_x_shields_and_cooldowns
-      lda #$03
-      sta p1_shields_copy, x       
-      lda #$02
-      sta player_move_cooldown, x
-      lda #$06 
-      sta player_fire_cooldown, x
-      rts
+  lda #DEFAULT_PLAYER_SHIELDS
+  sta p1_shields_copy, x       
+  lda #DEFAULT_PLAYER_MOVE_COOLDOWN
+  sta player_move_cooldown, x
+  lda #DEFAULT_PLAYER_FIRE_COOLDOWN
+  sta player_fire_cooldown, x
+  rts
  
 ;------------------------------------------------------------------
 
@@ -4212,7 +4281,7 @@ msg_banner
 !byte $32,$20,$96,$53,$20,$9E,$4C,$00
 
 map_start_addresses:
-!byte $00,$00,$37,$6E,$A5
+!byte $00,$00,$37,enemies_left_to_spawn,$A5
 
 map_colors:
 !byte $02,$04,$05
@@ -4249,11 +4318,15 @@ onebit_masks_zero_is_msb:
 onebit_masks_zero_is_lsb:
 !byte $01,$02,$04,$08,$10,$20,$40,$80
 
+label_1f05:
 !byte $04
 !byte $05
 
 player_spawn_xcoord:
-!byte $01,$25,$C0,$DB
+!byte $01,$25
+
+label_1f09:
+!byte $C0,$DB
 
 unknown_facing_table:
 !byte $08,$0C,$00
@@ -4265,12 +4338,13 @@ opposite_facing:
 player_spawn_facing:
 !byte $02,$03
 
-label_1f15:
+multiply_by_8:
 !byte $00,$08,$10
 
 label_1f18:
 !byte $02,$05
 
+label_1f1a:
 !byte $19,$03
 
 data_explosion_limits:
@@ -4308,76 +4382,52 @@ spar_images:
 !byte %..##....
 !byte %........
 
-!byte $00,$07,$21,$81,$11,$11
-!byte $03,$00,$10,$40,$07,$1F,$0F,$07
+label_1f38:
+!byte $00
+
+label_1f39:
+!byte $07,$21,$81,$11
+
+label_1f3d:
+!byte $11,$03,$00,$10
+
+label_1f41:
+!byte $40,$07,$1F,$0F,$07
 
 
 possible_sound_buffer:             
 !byte $8F,$00
 
-enemy_release_schedule:
-!byte $01,$07,$11,$08,$02,$04,$05
+;Enemy data tables:
 
-!byte $03,$05,$06,$04,$08,$01,$09
+non = $7f
+bul = $11
+wrm = $12
+spr = $13
+na = $ff
 
-!byte $01,$01
+;                                                 EGG VAC TT1 TT2 MUT LSK SKL CHM MKY RH1 THR ARC DOG RH2 FLI LON PLY BLT WRM SPR
+enemy_release_schedule:                     !byte $01,$07,$11,$08,$02,$04,$05,$03,$05,$06,$04,$08,$01,$09,$01,$01
+enemy_data_cd:                              !byte $00,$01,$13,$02,$32,$07,$00,$05,$1F,$80,$3B,$2A,$09,$40,$05,$08,$10,$00,$20,$00
+enemy_data_low_shields_high_score:          !byte $32,$83,$94,$32,$22,$44,$75,$55,$52,$73,$64,$85,$11,$64,$11,$33,$04,$01,$21,$01
+enemy_data_low_vision_high_update_cooldown: !byte $88,$9B,$5D,$77,$96,$69,$5A,$58,$6F,$FF,$9C,$8F,$A7,$6D,$C6,$88,$21,$21,$4A,$21
+enemy_data_a:                               !byte $06,$FF,$04,$04,$03,$0E,$00,$0E,$FF,$12,$FF,$FF,$10,$12,$07,$FF,$FF,$FF
+enemy_bullet_types:                         !byte non,non,bul,non,bul,non,non,non,bul,wrm,spr,spr,non,wrm,non,non,bul,na ,bul,na
+enemy_type_colors:                          !byte $7E,$75,$7A,$AA,$BA,$77,$71,$72,$A9,$34,$BC,$7B,$A9,$7D,$B6,$68,$22,$22,$60,$20
+enemy_initial_status:                       !byte $58,$40,$52,$48,$79,$40,$50,$58,$5A,$53,$7A,$5A,$68,$62,$78,$58,$62,$20,$21,$20
 
-enemy_data_cd:
-!byte $00,$01,$13,$02,$32,$07,$00
-!byte $05,$1F,$80,$3B,$2A,$09,$40
-!byte $05,$08,$10,$00,$20,$00
-
-enemy_shields_and_xval:
-!byte $32,$83
-!byte $94,$32,$22,$44,$75,$55
-!byte $52,$73
-!byte $64
-
-
-!byte $85,$11,$64,$11,$33,$04,$01
-!byte $21,$01
-
-enemy_data_ef:
-!byte $88,$9B,$5D,$77,$96,$69
-!byte $5A,$58,$6F,$FF,$9C
-
-!byte $8F,$A7,$6D
-!byte $C6,$88,$21,$21,$4A,$21
-
-enemy_data_a:
-!byte $06,$FF
-!byte $04,$04,$03,$0E,$00
-
-!byte $0E,$FF
-
-!byte $12
-!byte $FF,$FF,$10,$12,$07,$FF,$FF,$FF
-
-enemy_bullet_types:
-!byte $7F,$7F,$11,$7F,$11,$7F,$7F,$7F
-!byte $11,$12,$13
-
-!byte $13,$7F,$12,$7F,$7F
-!byte $11,$FF,$11,$FF
-
-enemy_type_colors:
-!byte $7E,$75,$7A,$AA
-!byte $BA,$77,$71,$72,$A9,$34,$BC
-
-!byte $7B,$A9,$7D,$B6,$68,$22,$22,$60,$20
-
-enemy_initial_status:
-!byte $58,$40,$52,$48,$79,$40,$50,$58
-!byte $5A,$53,$7A,$5A,$68,$62,$78,$58
-!byte $62,$20,$21,$20,$05,$12,$1E,$06
+label_1fe2:
+!byte $05,$12,$1E,$06
 !byte $09,$0C,$11,$0E,$10,$1A,$18,$18
 !byte $CF,$1C,$08,$0B,$00,$00,$32
+
 game_over_message:
-!byte $07
-!byte $01,$0D,$05,$00,$0F,$16,$05,$12
+!byte $07,$01,$0D,$05,$00,$0F,$16,$05,$12
+;     G   A   M   E   _   O   V   E   R
 
 press_f7_message:
 !byte $10,$12,$05,$13,$13,$00,$06,$37
+;     P   R   E   S   S   _   F   7
 
 label_2006:
 !byte $FF,$BF,$E0,$20,$00,$FA,$AA,$A8
