@@ -4410,7 +4410,7 @@ msg_status_bar_headers:
 !byte $32,$20,$96,$53,$20,$9E,$4C,$00
 
 map_start_addresses:
-!byte $00,$00,$37,enemies_left_to_spawn,$A5
+!byte $00,$00,$37,$6e,$A5
 
 map_colors:
 !byte $02,$04,$05
