@@ -8,6 +8,9 @@ POWEREDUP_PLAYER_FIRE_COOLDOWN = 4
 SHIELD_SPAR_COLOR = 1
 FIRE_SPAR_COLOR = 2
 SPEED_SPAR_COLOR = 6
+SPARS_TO_WIN_LEVEL = 5
+NO_EXTRA_SPAR_SPAWN_CHANCE = $c8
+MAX_EXTRA_SPAWNED_SPARS = 5
 
 c_empty = $20
 c_spar = $3f 
@@ -112,6 +115,7 @@ slot_udg_loaded_into  = $4096
 vision_char_seen_indir = $4061
 vision_dist_seen_indir = $4065
 ai_direction_votes     = $406d
+fire_bullet_in_direction = $407f
 vision_entityId_seen_indir = $40ae
 
 entity_enemy_type     = $4100        ; Index into enemy type lists.
@@ -148,25 +152,29 @@ processing_entity_number          = $05
 proposed_entity_x_coord           = $07
 proposed_entity_y_coord           = $08
 entity_number_that_hit_player     = $09
-processing_enemy_entityNo                     = $0d
+last_enemy_processed                     = $0d
 p1_lives                          = $11
 p2_lives                          = $12
 p1_shields_copy                   = $14
 p2_shields_copy                   = $15
 last_entity_killed_by_overpopulation                     = $39
-var_d                             = $41
+enemy_sweep_count                 = $3c
+escalation                        = $3f
+difficulty                             = $41
 udg_number_to_load                = $44
 interrupt_counter                 = $46
 level_units_b                     = $47
-found_empty_entity_number         = $48
+max_enemy_entity         = $48
 player_move_cooldown_counter                     = $49
 level_number_byte                     = $4b
 oldest_bullet_entity_id                             = $4c
 player_fire_cooldown_counter                     = $4e
+spar_animation_timer              = $52
 player_sound_flag                 = $66
 spars_spawned_by_0d33             = $6b
-var_e                             = $6c
+fast_updates_count                             = $6c
 enemies_left_to_spawn             = $6e
+extra_enemies_spawnable             = $8e
 player_has_ticked                 = $a8
 player_move_cooldown              = $aa
 level_bcd_tens                    = $b0
@@ -183,9 +191,16 @@ extra_enemy_spawn_chance          = $d7
 ; Entity status byte layout
 ; Bit 8/sign = 1 = entity is between squares
 ; Bit 6/$20  = 1 = immune to damage
+esb_frozen        =  $40
 esb_invulnerable  =  $20
 
 
+; Color flags (high byte)
+; Bit 6 = invisible
+csf_aggressive      = $40  ;  ( If 1, $165b adds proximity bonus when non-vacuum entity seen )
+csf_visible        = $20   ;  ( If 0, $1273 sets drawing color to 0 )
+csf_collects_spars = $10   ;  ( If 1, $15db applies direction votes when spars seen)
+csf_semirandom     = $08  
 
 ;to "xroads2.d64", d64
 !to "xroads2.prg", cbm
@@ -947,7 +962,7 @@ label_0ab7
  ldx #$04
  tay
  sta game_status_flags
- stx $52             
+ stx spar_animation_timer             
 
  
 generate_multiples_array
@@ -976,9 +991,9 @@ install_isr
 title_screen_init
    jsr clear_explosions
    ldx #$07
-   stx processing_enemy_entityNo
-   stx found_empty_entity_number
-   stx $52
+   stx last_enemy_processed
+   stx max_enemy_entity
+   stx spar_animation_timer
    sta game_status_flags
 
 .clear_player_scores
@@ -1116,7 +1131,7 @@ label_0c12
    jmp label_0b7f
 
 label_0c15
-   jsr label_152d
+   jsr game_loop_enemies
    jmp label_0bfa
 
 ; --------------------------------------------------------------------   
@@ -1188,8 +1203,8 @@ per_level_init
    sta spars_spawned_by_0d33
    lda #$02
    sta oldest_bullet_entity_id
-   sta var_d
-   sta var_e
+   sta difficulty
+   sta fast_updates_count
    lda level_number_byte
    asl
    asl
@@ -1200,7 +1215,7 @@ per_level_init
 
 label_0c8c
    ldx #$0c
-   stx processing_enemy_entityNo
+   stx last_enemy_processed
    dex
    stx last_entity_killed_by_overpopulation
    jsr reset_entity_count_and_udgs
@@ -1237,6 +1252,10 @@ label_0c8c
    lda #$f9
    sta jiffy255_clock
 
+; Main game loop begins here. This is game loop part 1.   
+   
+!zone game_loop
+  
 game_loop:
    ldy pressed_key_code
    cpy #$06                ; Is F5, Pause, being pressed?
@@ -1244,12 +1263,11 @@ game_loop:
    lda game_status_flags   ; Yes, flip paused bit.
    eor #$01
    sta game_status_flags
-
+   
    ; Wait 16 jiffies after flipping pause bit. This is probably to avoid
    ; pause being constantly switched back and forth if the player holds F5 
    ; for more than 1/60 of a second.
 .target_jiffytime = $fc
-
 wait_16jiffies
   lda jiffy_clock           ; Get jiffy clock value
   clc                       ; Add 16
@@ -1263,66 +1281,68 @@ wait_16jiffies
 
 label_0cdc
    lda game_status_flags
-   beq label_0d01
+   beq .not_paused
    
    ; While paused, check for f1/f3 being pressed to change player color.
    ; For some bizarre reason we check on alternate jiffies for f1 and f3.
-   lda jiffy_clock
-   and #$01
+   lda jiffy_clock                ; Get jiffy clock
+   and #$01                       ; Mask off last bit, 1 or 0
    tax
    tya
-   cmp player_function_keys, x
-   bne game_loop
-   lda p1_lives, x
-   beq game_loop
-   inc player_color, x
-   lda player_color, x
-   ora #$20
-   sta entity_color_and_flags, x
-   jsr draw_entity_x
-   jmp wait_16jiffies
+   cmp player_function_keys, x    ; Check for F1 or F3 according to parity of jiffy
+   bne game_loop                  ; If not pressed, restart game loop
+   lda p1_lives, x                ; Check player x is actually alive
+   beq game_loop                  ; If not, can't change color, restart game loop
+   inc player_color, x            ; Increment that player's color in stored array
+   lda player_color, x            ; Load it from that array   
+   ora #csf_visible               ; Turn on visible flag
+   sta entity_color_and_flags, x  ; Update player in entity list
+   jsr draw_entity_x              ; Redraw affected player
+   jmp wait_16jiffies             ; Wait 16 jiffies to avoid bounce
 
-label_0d01
+.not_paused:
    lda interrupt_counter
-   beq label_0d0b
+   beq game_loop_reentry_from_players
    jsr update_player_bullets
-   jmp game_loop_players
+   jmp game_loop_players          ; Go to game loop part 2, players
 
-label_0d0b
-   lda jiffy255_clock
-   bmi label_0d1b
-   lda #$f9
+game_loop_reentry_from_players    ; .. Player handling branches back here
+   lda jiffy255_clock             ; Check coarse timer 
+   bmi done_escalation            ; If it's not reached zero, don't escalate yet.
+   lda #$f9                       ; Reset to reach zero again in 7 ticks.
    sta jiffy255_clock
-   inc $3f
-   bne label_0d1b
-   lda #$ff
-   sta $3f
+   inc escalation                 ; Increase escalation meter
+   bne done_escalation            ; If it overflowed to zero..
+   lda #$ff                       ; Set it to max
+   sta escalation
 
-label_0d1b
-      dec var_e
-      bne label_0d33
-      lda var_d
-      sta var_e
-      lda jiffy_clock
-      sta $fc
-      lda var_d
-      cmp #$ff
-      beq label_0d33
+done_escalation
+   dec fast_updates_count         ; Count down "fast updates" for difficulty scaling.
+   bne .fast_update               ; If fast updates still to do, do one.
+   lda difficulty                 ; Reset fast update counter to difficuly.
+   sta fast_updates_count
+   
+   lda jiffy_clock                ; Capture jiffy clock time.
+   sta .target_jiffytime
+   lda difficulty                 ; If difficulty is $ff, make all updates fast.
+   cmp #$ff
+   beq .fast_update
 
-label_0d2d
-      lda jiffy_clock
-      cmp $fc
-      beq label_0d2d
+.wait_for_jiffy                   ; Wait for end of current jiffy.
+   lda jiffy_clock
+   cmp .target_jiffytime
+   beq .wait_for_jiffy
 
-label_0d33
-   jsr label_152d
+.fast_update
+   jsr game_loop_enemies
+   
    lda sid_voice3_oscillator_ro
    bne .dont_spawn_spar
    lda sid_voice3_oscillator_ro
-   cmp #$c8
+   cmp #NO_EXTRA_SPAR_SPAWN_CHANCE
    bcc .dont_spawn_spar
    lda spars_spawned_by_0d33
-   cmp #$05
+   cmp #MAX_EXTRA_SPAWNED_SPARS
    bcs .dont_spawn_spar
    inc spars_spawned_by_0d33
    jsr set_xy_to_random_empty_space_coord
@@ -1952,34 +1972,34 @@ label_107a:
   
   
   dec $40
-  bne label_10c0
+  bne dont_update_difficulty
   
   lda #$03
   sta $40
-  lda $3f
+  lda escalation
   sec
-  sbc $3c
-  beq label_10bc
-  bcs label_10b6
-  dec var_d
-  bne label_10bc
+  sbc enemy_sweep_count
+  beq done_difficulty_check
+  bcs .increase_difficulty
+  dec difficulty
+  bne done_difficulty_check      ; If it didnt' become zero, branch..
 
-  inc var_d
-  bne label_10bc
-label_10b6:
-  inc var_d
-  bne label_10bc
-  dec var_d
+  inc difficulty           ; So it did become zero.. here it becomes one..
+  bne done_difficulty_check      ; How would this not be true?
+.increase_difficulty:
+  inc difficulty
+  bne done_difficulty_check      ; If it didn't become zero, branch..
+  dec difficulty           ; It was zero, so here it becomes $ff.
 
-label_10bc:
+done_difficulty_check:
   lda #00
-  sta $3c
+  sta enemy_sweep_count
 
-label_10c0:
-  dec $52
-  bne label_10e0
+dont_update_difficulty:
+  dec spar_animation_timer
+  bne .dont_animate_spars
   lda #02
-  sta $52
+  sta spar_animation_timer
   
   ; Animate rotating spars.
   ldx current_spar_frame
@@ -1998,7 +2018,7 @@ label_10c0:
   dex
   bpl .copy_new_spar_image
 
-  label_10e0:
+.dont_animate_spars:
   ldx #$07
   
 .do_explosions_loop:
@@ -2072,7 +2092,7 @@ label_1149:
 
 reset_entity_count_and_udgs
   lda #$00                         ; Set empty entity to 0
-  sta found_empty_entity_number
+  sta max_enemy_entity
   sta $bc                          ; ?? 
   
 ; Reset UDG slot index array to $ff  
@@ -2100,7 +2120,7 @@ reset_entity_count_and_udgs
   bcc .load_initial_udgs_loop
   
   ldx #$0c
-  stx processing_enemy_entityNo
+  stx last_enemy_processed
   dex
   stx last_entity_killed_by_overpopulation
   lda sid_voice3_oscillator_ro
@@ -2179,7 +2199,7 @@ label_11dc
    sta entity_status_byte, x
 
 label_120f
-   lda $8e
+   lda extra_enemies_spawnable
    bpl erase_entity_x_from_screen
    lda #$00
    sta entity_shields, x
@@ -2269,7 +2289,7 @@ draw_entity_x:
 
 draw_entity_x_override_color:
    lda entity_color_and_flags, x
-   and #$20
+   and #csf_visible
    bne label_1279
    lda #$00
    sta color_to_write
@@ -2336,22 +2356,23 @@ write_scrn_char_side_from_localvars_to_xy
 
 !zone set_xy_to_random_empty_space_coord
   
+.initial_rand = $fc
 set_xy_to_random_empty_space_coord
    lda sid_voice3_oscillator_ro
    and #$1f        ;  random value 0-31.. 
-   sta $fc
+   sta .initial_rand
    lda sid_voice3_oscillator_ro
    and #$07        ; add random value 0-7, to make 0-38.
    clc
-   adc $fc
+   adc .initial_rand
    tax             ; store in x
    lda sid_voice3_oscillator_ro
    and #$0f        ; random value 0-15
    adc #$02        ; add 2 for 2 rows of status bar..
-   sta $fc
+   sta .initial_rand
    lda sid_voice3_oscillator_ro
    and #$07        ; add random value 0-7 to make 2-24
-   adc $fc
+   adc .initial_rand
    tay             
    jsr read_a_from_screen_position_xy ; get value at that position
    cmp #c_empty      ; is it blank?
@@ -2365,10 +2386,10 @@ explode_entity_maybe
          tay
       stx $fe
       lda #$05
-      sta $8e
+      sta extra_enemies_spawnable
       cpy #$00
       bne label_130a
-      dec $8e
+      dec extra_enemies_spawnable
 
 label_130a
    ldx  label_1e9b, y
@@ -2378,7 +2399,7 @@ label_130d
       beq label_133b
    lda explosion_or_implosion, x
       bne label_1328
-      dec $8e
+      dec extra_enemies_spawnable
       bpl label_1328
       lda $fe
       cmp #$02
@@ -2577,9 +2598,9 @@ find_free_enemy_entity_in_x_and_locals
   ldx last_entity_killed_by_overpopulation
 
 .found_zero_shield_entity
-  cpx found_empty_entity_number
-  bcc .empty_entity_already_existed
-  stx found_empty_entity_number
+  cpx max_enemy_entity               ; If found entity no was less than current max,
+  bcc .empty_entity_already_existed  ; leave it alone.
+  stx max_enemy_entity               ; Else, update max to found entity number.
 
 .empty_entity_already_existed
   stx $a3                      ; I'm not sure when/if this is used..
@@ -2759,71 +2780,92 @@ label_152a
 
 ; ---------------------------------------------------------------------         
          
-label_152d
-   lda enemies_left_to_spawn
-   beq .initial_spawns_done
-   jsr spawn_enemy_maybe
-   lda $8e
-   bmi done_enemy_spawning
-   dec enemies_left_to_spawn
+; ENEMIES GAME LOOP. This is game loop part 3, and the only part that runs on
+; the title screen.
+
+!zone game_loop_enemies
+
+game_loop_enemies:
+   lda enemies_left_to_spawn      ; Do we still have enemies to spawn?
+   beq .initial_spawns_done       ; If not, just do random spawns.
+   jsr spawn_enemy_maybe          ; If so, spawn an enemy.
+   lda extra_enemies_spawnable    ; After that, do we have scope to spawn extra enemies?                               
+   bmi done_enemy_spawning        ; If no, we're done with spawning. 
+   dec enemies_left_to_spawn      ; Otherwise, think about spawning one.
 
 .initial_spawns_done
-   lda sid_voice3_oscillator_ro
-   bne done_enemy_spawning
-   lda sid_voice3_oscillator_ro
-   cmp extra_enemy_spawn_chance
-   bcs done_enemy_spawning
-   jsr spawn_enemy_maybe
+   lda sid_voice3_oscillator_ro   ; Get random value
+   bne done_enemy_spawning        ; If it's not zero (3/4 chance), don't spawn.
+   lda sid_voice3_oscillator_ro   ; Get another random value
+   cmp extra_enemy_spawn_chance   ; Compare to level spawn chance.
+   bcs done_enemy_spawning        ; If higher, don't spawn. 
+   jsr spawn_enemy_maybe          ; Otherwise, spawn an enemy.
 
+; Actual enemy processing. For speed, we only run ONE enemy's AI each cycle.
+; However, we can skip over any number of ineligible enemies along the way. 
+      
 done_enemy_spawning
-   inc processing_enemy_entityNo
-   ldx processing_enemy_entityNo
-   cpx found_empty_entity_number
-   bcc label_1563
-   beq label_1555
-   bcs label_155c
+   inc last_enemy_processed   ; Move to next active enemy.
+   ldx last_enemy_processed   ; Load active enemy number.
+   cpx max_enemy_entity       ; Compare to max entity.
+   bcc process_entity_x_no_return  ; If it's LESS, treat as regular entity 
+                                   ; processing. If the entity is dead, frozen, 
+                                   ; or not ticked, this will return to $1549.
+                                   ; If an entity is processed, this will eventually 
+                                   ; tail call to draw_entity_x, which will RTS
+                                   ; and return to $0d33. 
+                                   
+   beq .maybe_prune_last_dead_entity  ; If it's EQUAL, process the enemy as 
+                                      ; normal if it's alive, but if it's dead,
+                                      ; lower the max. This means that each 
+                                      ; cycle the max will tend towards the 
+                                      ; number of active entities.
+   bcs .reset_enemy_sweep
 
-label_1555
-   lda entity_shields, x
-   bne label_1568
-   dec found_empty_entity_number
+.maybe_prune_last_dead_entity
+   lda entity_shields, x              ; Is the entity at the max point alive?
+   bne process_entity_x_not_dead      ; Yes, process it as usual.
+   dec max_enemy_entity               ; Otherwise, lower the max.
 
-label_155c
-      ldx #$0b
-      stx processing_enemy_entityNo
-      inc $3c
-         rts
+.reset_enemy_sweep
+   ldx #$0b                           ; Set last enemy to $0b, one entity before
+   stx last_enemy_processed           ; the start of possible enemies.
+   inc enemy_sweep_count
+   rts
 
 ; -------------------------------------------------------------------         
          
 !zone enemy_update_maybe
   
-label_1563
-   lda entity_shields, x     ; If entity is dead, don't update it.
+process_entity_x_no_return
+   lda entity_shields, x         ; If entity is dead, don't update it.
    beq done_enemy_spawning
 
-label_1568
+process_entity_x_not_dead
    lda entity_status_byte, x     ; Check frozen bit?
-   and #$40                      ; If set, don't update.
-   bne done_enemy_spawning
-   dec entity_upd_countdown, x   ; Update update countdown.
-   bne done_enemy_spawning         ; If not 0, no further update.
+   and #esb_frozen               ; If set, don't update,
+   bne done_enemy_spawning       ; nor count this as the updated enemy this cycle.
+   
+   dec entity_upd_countdown, x   ; Update entity's tick countdown.
+   bne done_enemy_spawning       ; If not 0, no further update, and this isn't
+                                 ; the updated enemy this cycle.
+                                 
    lda entity_upd_cooldown, x    ; If 0, reset to cooldown.
    sta entity_upd_countdown, x
    lda entity_spars_eaten, x
-   bpl label_1587
+   bpl .do_enemy_update
    lda #$00                      ; Not sure how spars eaten would go negative??
    sta entity_spars_eaten, x
    jmp draw_entity_x
 
-label_1587
+.do_enemy_update:
    lda entity_status_byte, x     ; Are we between squares?
-   bpl label_158f                ; If not, do a full update.
+   bpl .full_enemy_update                ; If not, do a full update.
                                  ; Otherwise, all we can do is move forward.
    jmp move_forward_and_redraw_entity_x
    
    
-label_158f
+.full_enemy_update
    lda entity_bullet_type, x     ; Check if we are a bullet, or a monster.
    bpl .creature_ai              ; If we're a monster, go do smarter stuff.
 
@@ -2841,10 +2883,10 @@ update_bullet:
 
 .bullet_hit_something
    ldy entity_bullet_type, x
-   bmi label_15ad                 ;??
-   dec var_d            
+   bmi label_15ad                 ; A still holds screen value at this point??
+   dec difficulty                 ; Decrease difficulty??
    bne label_15ad
-   inc var_d
+   inc difficulty
 
 label_15ad
    cmp #c_player
@@ -2862,37 +2904,37 @@ label_15ad
    sta entity_shields, x
    jmp blank_out_entity_x_nondestructive
 
-; -----   
+; ------------------------------------------------------------------   
    
 .creature_ai
    jsr load_vision_buffers_entity_x
    ldy #dir_left
 
 .check_direction_y
-   ldx processing_enemy_entityNo
+   ldx last_enemy_processed
    lda vision_char_seen_indir, y
-   cmp #c_spar
-   bcc .saw_nothing_interesting
-   cmp #c_player
-   bcs .saw_entity
-   lda entity_color_and_flags, x
-   and #$10
-   beq .saw_nothing_interesting
-   jsr apply_proximity_bonus_in_direction_y
+   cmp #c_spar                            ; Did we see something with LESS value than a spar?
+   bcc .saw_nothing_interesting           ; It's not interesting.
+   cmp #c_player                          ; Did we see the player OR GREATER?
+   bcs .saw_entity                        ; Count it as an entity seen.
+   lda entity_color_and_flags, x          ; If we're here, we saw a spar.
+   and #csf_collects_spars                ; Are we interested in them?
+   beq .saw_nothing_interesting           ; If not, ignore it.
+   jsr apply_proximity_bonus_in_direction_y ; If so, add proximity votes.
 
 .saw_nothing_interesting
-   dey
-   bpl .check_direction_y
-   jmp .end_voting_prefer_existing_avoid_uturn
+   dey                                          ; Check next direction.
+   bpl .check_direction_y                        
+   jmp .end_voting_prefer_existing_avoid_uturn  ; If all done, end voting.
 
 .saw_entity
-   ldx vision_entityId_seen_indir, y
-   lda entity_enemy_type, x
-   cmp #et_bullet
-   bcc label_1609
-   cmp #et_worm
-   beq label_1609
-   ldx processing_enemy_entityNo
+   ldx vision_entityId_seen_indir, y     ; Get entity we saw.
+   lda entity_enemy_type, x              ; What type it is?
+   cmp #et_bullet                        ; Is it LESS than bullet (ie, not a bullet?)
+   bcc .saw_non_projectile               ; Go to non projectile.
+   cmp #et_worm                          ; Is it a worm (which is bullet+1)?
+   beq .saw_non_projectile               ; Go to non projectile.
+   ldx last_enemy_processed
    lda entity_status_byte, x
    and #$10
    bne label_1600
@@ -2902,13 +2944,15 @@ label_1600
    lda entity_bullet_type, x
    cmp #et_worm
    beq .saw_nothing_interesting
-   beq label_1660            ;  bug?? never taken.
+   beq .generate_407f            ;  bug?? never taken.
 
-label_1609       
-   ldx processing_enemy_entityNo
-   cmp entity_enemy_type, x
+.saw_non_projectile              ; a should be holding seen enemy type from $15e9.
+                                 ; On fall through from above, it is holding bullet
+                                 ; type??
+   ldx last_enemy_processed
+   cmp entity_enemy_type, x      ; Is it the same as me?
    beq label_161a
-   cmp entity_data_cdlow, x
+   cmp entity_data_cdlow, x      
    beq label_161a
    cmp entity_type_fired_me, x
    bne label_1634
@@ -2938,33 +2982,33 @@ label_1634
    beq .run_away            ; Run away!
 
 label_1648
-   ldx processing_enemy_entityNo          ; Look at our colorflags
+   ldx last_enemy_processed          ; Look at our colorflags
    lda entity_color_and_flags, x          ; If MSB is not set
-   bpl label_1656                         ; Consider approach, else run away.
+   bpl .approach_or_wander                ; Consider approach, else run away.
 
 .run_away
-   ldx processing_enemy_entityNo
+   ldx last_enemy_processed
    jsr apply_double_proximity_penalty_in_direction_y_and_single_in_opposite
-   bne label_1660
+   bne .generate_407f
 
-label_1656
+.approach_or_wander
    lda entity_color_and_flags, x
-      and #$40
-      beq label_1660
+   and #csf_aggressive
+   beq .generate_407f
    jsr apply_proximity_bonus_in_direction_y
 
-label_1660
+.generate_407f
    lda entity_status_byte, x
    and #$03
    sta temp_entity_x_coord
    jsr load_two_low_bits_of_osc3_to_accumulator
    sec
    sbc temp_entity_x_coord
-   sta $407f, y
+   sta fire_bullet_in_direction, y
    jmp .saw_nothing_interesting
 
 .end_voting_prefer_existing_avoid_uturn
-   ldx processing_enemy_entityNo
+   ldx last_enemy_processed
    lda entity_facing, x
    tax
    tay
@@ -2974,7 +3018,7 @@ label_1660
    dec ai_direction_votes, x
    jsr bump_random_direction_votes
 
-label_1689
+.tied_best_direction
    jsr bump_random_direction_votes
 
 .best_direction = $0e  
@@ -2990,12 +3034,12 @@ label_1689
 .find_best_direction_loop
    lda ai_direction_votes, y
    cmp .most_direction_votes
-   bcc label_16a3
-   beq label_1689
+   bcc .not_best_direction
+   beq .tied_best_direction
    sta .most_direction_votes
    sty .best_direction
 
-label_16a3
+.not_best_direction
    dey
    bpl .find_best_direction_loop
    
@@ -3030,7 +3074,7 @@ label_16d1
          dey
       bpl label_16c8
       lda $0e
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
    cmp entity_facing, x
       beq label_16e8
    sta entity_facing, x
@@ -3038,7 +3082,7 @@ label_16d1
    jmp label_1809
 
 label_16e8
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
       ldy $0e
    lda vision_dist_seen_indir, y
       cmp #$01
@@ -3082,7 +3126,7 @@ label_173e
    jmp clear_bit_3_on_entity_x_and_draw
 
 label_1741
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
       lda #$09
    sta entity_upd_countdown, x
    sta entity_upd_cooldown, x
@@ -3119,7 +3163,7 @@ label_1775
       sta $0a
       stx entity_number_that_hit_player
    jsr process_collision_between_09_and_0a
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
    lda entity_shields, x
       beq label_17f6
       ldx $0a
@@ -3132,7 +3176,7 @@ label_1794
    lda entity_enemy_type, x
       cmp #et_tagteam2
       bne label_17d9
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
    lda entity_enemy_type, x
       cmp #et_mutant
       bne label_17d9
@@ -3160,12 +3204,12 @@ label_1794
    jmp draw_entity_x
 
 label_17d9
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
    jsr flip_bit_3_on_status_of_entity_x
    jmp draw_entity_x
 
 label_17e1
-      ldx processing_enemy_entityNo
+      ldx last_enemy_processed
    jsr clear_bit_3_on_entity_x_and_draw
    jmp label_1809
 
@@ -3199,14 +3243,14 @@ label_1809
       ldy $0e
 
 label_180b
-   lda $407f, y
+   lda fire_bullet_in_direction, y
    bmi label_1811
    rts
 
 label_1811
    jsr find_free_enemy_entity_in_x_and_locals
    tya
-   ldy processing_enemy_entityNo
+   ldy last_enemy_processed
    jsr label_1b5f
    lda #$06
    tay
@@ -3233,11 +3277,15 @@ apply_double_proximity_penalty_in_direction_y_and_single_in_opposite
 ; -------------------------------------------------------------------
 
 !zone game_loop_players
+  
+; PLAYER PROCESSING. This is game loop part 2, called in the main game 
+; loop from $0d08.
+  
 
 checking_player_number = $3a         
          
 game_loop_players                    
-   ldx #$01                     ; Player 2 is checked first and we 
+   ldx #$01                    ; Player 2 is checked first and we 
    stx checking_player_number  ; count down.
 
 .check_players_loop
@@ -3249,9 +3297,9 @@ game_loop_players
    lda #$00                     ; Mark tick as used up.
    sta player_has_ticked, x
    lda entity_status_byte, x    ; Is bit 7 set on player?
-   and #$40
+   and #esb_frozen
    bne .dont_process_player     ; If so, don't process them.
-   jsr player_movement               ; Calls to actually do processing.
+   jsr player_movement          ; Calls to actually do processing.
    jsr player_firing
 
 .dont_process_player
@@ -3261,7 +3309,7 @@ game_loop_players
    lda entity_spars_eaten       ; Get p1's collected spars.
    clc
    adc entity_spars_eaten+1     ; Add p2's collected spars.
-   cmp #$05                     
+   cmp #SPARS_TO_WIN_LEVEL                    
    bcc .level_not_complete      ; If <5, level isn't complete. 
    jmp end_of_level
 
@@ -3273,7 +3321,7 @@ game_loop_players
    jmp show_game_over           ; Game IS over..
 
 .game_not_over
-   jmp label_0d0b
+   jmp game_loop_reentry_from_players
 
 ; ----------------------------------------------------------------
 
@@ -3521,7 +3569,7 @@ reduce_player_x_lives
 spawn_player
   lda level_number_byte
   lsr
-  sta $3f
+  sta escalation
   stx processing_entity_number
   lda p1_lives, x
   beq .player_dead_dead
@@ -3533,7 +3581,7 @@ spawn_player
   sta player_move_cooldown_counter, x
   sta player_fire_cooldown_counter, x
   lda player_color, x
-  ora #$20
+  ora #csf_visible
   sta entity_color_and_flags, x
   lda player_spawn_xcoord, x
   sta proposed_entity_x_coord
@@ -3593,7 +3641,7 @@ label_1a1d
    lda #$00
    sta vision_dist_seen_indir, y
    sta $4069, y
-   sta $407f, y
+   sta fire_bullet_in_direction, y
    dey
    bpl label_1a1d
    sta $42
@@ -3690,7 +3738,7 @@ show_game_over:
    
    jsr show_press_f7
    beq .game_over_f7_pressed
-   jmp label_0d1b
+   jmp done_escalation
  
 .game_over_f7_pressed
    lda #$93              ; Clear screen
@@ -3904,10 +3952,10 @@ label_1bea
 label_1beb
    lda entity_bullet_type, x
       bmi label_1bf8
-      inc var_d
+      inc difficulty
       bne label_1bf8
       lda #$ff
-      sta var_d
+      sta difficulty
 
 label_1bf8
    jmp draw_entity_x
