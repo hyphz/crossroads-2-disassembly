@@ -12,8 +12,21 @@ SPARS_TO_WIN_LEVEL = 5
 NO_EXTRA_SPAR_SPAWN_CHANCE = $c8
 MAX_EXTRA_SPAWNED_SPARS = 5
 MAX_PLAYER_SHIELDS = 9
-
 UNENCRYPTED_SCROLLTEXT_CHARACTERS = 96
+
+pristine = 1
+
+!ifndef pristine {
+  always_show_credits = 1
+  minimum_escalation = 9
+  remove_dead_code = 1
+  ;show_timing_info = 1
+}
+
+
+NUMBER_TO_PETSCII_ADJUSTMENT = $30
+PLAYER_SCORE_DIGITS = 8
+
 
 c_empty = $20
 c_spar = $3f 
@@ -180,7 +193,7 @@ spar_animation_timer              = $52
 player_sound_flag                 = $66
 spars_spawned_by_0d33             = $6b
 fast_updates_count                = $6c
-hide_credits                      = $6d
+show_credits                      = $6d
 enemies_left_to_spawn             = $6e
 extra_enemies_spawnable           = $8e
 player_has_ticked                 = $a8
@@ -892,7 +905,11 @@ label_0a67
 label_0a6e
  lda #$00
  sta cia_timer_control
- sta hide_credits
+ sta show_credits
+ 
+!ifdef always_show_credits {
+  inc show_credits
+}
  lda #%01110011
  sta ram_rom_mapping   ; Make character ROM visible at d000
  ldx #$ec
@@ -921,17 +938,25 @@ label_0a8c
  sta cia_timer_control
  lda #$1a
  sta vic_select_buffers
- lda vic_extra_bg_col_3
- cmp #$f6
- bne label_0aac
- inc hide_credits
 
-label_0aac
- lda program_end
- bne .loaded_clean
- inc hide_credits
+!ifndef always_show_credits { 
+ ; Determine if the credits should be shown. Because Compute! magazine removed programmer's names from
+ ; published programs, the credits are hidden and only displayed if the program is running from Compute!'s
+ ; consumer disk loader or from a typed in program - not if it's running from a raw image, as the
+ ; publishers would check.
+ lda vic_extra_bg_col_3       
+ cmp #$f6                 ; Check for BG col $f6 - this is presumably set by the Compute! disk loader.
+ bne .no_compute_loader
+ inc show_credits         ; If set, credits will be shown.
+ 
+.no_compute_loader
+ lda program_end          ; Check for a 0 at the end of the program. This was because Compute! padded 
+ bne .no_type_in          ; their listings for type in programs with zeroes at the end.
+ inc show_credits         ; If set, credits will be shown. 
 
-.loaded_clean
+.no_type_in
+}
+
  lda #$01
  sta $fc
 
@@ -1060,7 +1085,7 @@ label_0b88
     ldx $53                                     ; Get scrolltext position
     cpx #UNENCRYPTED_SCROLLTEXT_CHARACTERS      ; Are we within the unencrypted section?
     bcc .no_credit_decrypt
-    txa                                         ; No. Mave X, position we're on, to A
+    txa                                         ; No. Move X, position we're on, to A
     sec
     sbc #UNENCRYPTED_SCROLLTEXT_CHARACTERS      ; and subtract to get the encrypted character number
     tay
@@ -1134,7 +1159,7 @@ label_0bfa
    inx
    cpx #UNENCRYPTED_SCROLLTEXT_CHARACTERS
    bcc label_0c12
-   lda hide_credits
+   lda show_credits
    beq label_0c0f
    cpx #$73
    bcc label_0c12
@@ -1327,11 +1352,25 @@ game_loop_reentry_from_players    ; .. Player handling branches back here
    lda #$f9                       ; Reset to reach zero again in 7 ticks.
    sta jiffy255_clock
    inc escalation                 ; Increase escalation meter
-   bne done_escalation            ; If it overflowed to zero..
+!ifndef show_timing_info {
+   bne done_escalation           
+}
+!ifdef show_timing_info {
+   bne updated_escalation
+}
+
+ ; If it overflowed to zero..
    lda #$ff                       ; Set it to max
    sta escalation
 
-done_escalation
+!ifdef show_timing_info {
+updated_escalation:
+   ldx #5
+   jsr display_hex_value
+}
+   
+   
+done_escalation:
    dec fast_updates_count         ; Count down "fast updates" for difficulty scaling.
    bne .fast_update               ; If fast updates still to do, do one.
    lda difficulty                 ; Reset fast update counter to difficuly.
@@ -1625,7 +1664,9 @@ inc_and_clear_smb_64bytes
    
 ; ----------------------------------------------------------------   
    
+!ifndef remove_dead_code {
 !byte $20,$58,$0F    ; JSR $0f58?
+}
 
 !zone draw_map
   
@@ -1687,11 +1728,11 @@ label_0ee2
    ldx .current_map_offset
    lda $bb
    bmi label_0efb
-   lda $2006, x
+   lda label_2006, x
    jmp label_0efe
 
 label_0efb
-   lda $20e2, x
+   lda label_20e2, x
 
 
 
@@ -1752,46 +1793,69 @@ label_0efe
          
 !zone update_status_bar
   
-update_status_bar:
-   ldx #$07
-   clc
+; Offsets to the given scores, on the second line of the screen, from the start of screen memory.
+  
+sbpos_player1_score = 40
+sbpos_player2_score = 67
+sbpos_high_score = 53
+sbpos_player1_lives = 51
+sbpos_player2_lives = 78
+sbpos_level_tens = 63
+sbpos_level_ones = sbpos_level_tens + 1
+sbpos_player1_shields = 49
+sbpos_player2_shields = 76
+
+update_status_bar:    
+; Update the whole stats bar. First, player scores:
+
+   ldx #PLAYER_SCORE_DIGITS-1            ; Count down player score digits
+   clc                                   ; Set up for addition
 
 .score_digits_loop
-   lda player_1_score_digits, x
-   adc #$30
-   sta screen+40, x
-   lda player_2_score_digits, x
-   adc #$30
-   sta screen+67, x
-   lda high_score_digits, x
-   adc #$30
-   sta screen+53, x
-   dex
-   bpl .score_digits_loop
+   lda player_1_score_digits, x          ; Load x'th digit of player score
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT     ; Convert it to PETSCII value
+   sta screen+sbpos_player1_score, x     ; Store it in x'th index of screen starting at score position
+   
+   lda player_2_score_digits, x          ; Same for player 2 score
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT     ; (and for everything else below)
+   sta screen+sbpos_player2_score, x
+   
+   lda high_score_digits, x              ; And for high score
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_high_score, x
+   
+   dex                                   ; Count down player score digits
+   bpl .score_digits_loop                ; Go back to do rest of score
 
+; Entry point used when scores don't need to be updated.
 update_status_bar_not_scores:
-   lda p1_lives        ; Player 1 lives
+   lda p1_lives                          ; Player 1 lives
    clc
-   adc #$30
-   sta screen+51
-   lda p2_lives       ; Player 2 lives
-   adc #$30
-   sta screen+78  
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_player1_lives
+   
+   lda p2_lives                          ; Player 2 lives
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_player2_lives  
+   
    lda level_bcd_tens
-   adc #$30
-   sta screen+63  ; Level tens
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_level_tens           ; Level tens
+   
    lda level_bcd_units
-   adc #$30 
-   sta screen+64  ; Level units
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_level_ones           ; Level units
 
+; Entry point for updating just the shields.
 update_status_bar_just_shields:
-   lda entity_shields      ; Player 1 shields
+   lda entity_shields                    ; Player 1 shields
    clc
-   adc #$30
-   sta screen+49
-   lda p2_shields      ; Player 2 shields
-   adc #$30
-   sta screen+76  
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_player1_shields
+   
+   lda p2_shields                        ; Player 2 shields
+   adc #NUMBER_TO_PETSCII_ADJUSTMENT
+   sta screen+sbpos_player2_shields  
    rts
 
 ; ----------------------------------------------------------------------
@@ -2007,6 +2071,15 @@ label_107a:
   dec difficulty           ; It was zero, so here it becomes $ff.
 
 done_difficulty_check:
+!ifdef show_timing_info {
+  ldx #20
+  lda enemy_sweep_count
+  jsr display_hex_value
+  ldx #32
+  lda difficulty
+  jsr display_hex_value
+}
+  
   lda #00
   sta enemy_sweep_count
 
@@ -2288,7 +2361,11 @@ label_1258
       cmp #$06
       beq label_124f
          rts
+         
+!ifndef remove_dead_code {
 !byte $AA
+}
+
 
 ; -----------------------------------------------------------------
 
@@ -2488,7 +2565,7 @@ label_138d
    lda entity_facing, y
          tay
       sta $fd
-   lda $1edb, y
+   lda label_1edb, y
 
 label_1396
          clc
@@ -2530,7 +2607,7 @@ label_13b6
 
 label_13d7
       ldy $fd
-   lda $1edf, y
+   lda label_1edf, y
 
 label_13dc
          clc
@@ -2959,8 +3036,10 @@ label_1600
    lda entity_bullet_type, x
    cmp #et_worm
    beq .saw_nothing_interesting
+!ifndef remove_dead_code {
    beq .generate_407f            ;  bug?? never taken.
-
+}
+ 
 .saw_non_projectile              ; a should be holding seen enemy type from $15e9.
                                  ; On fall through from above, it is holding bullet
                                  ; type??
@@ -3492,8 +3571,11 @@ label_18c4
    sta entity_shields, x
    jsr update_status_bar_just_shields
    jmp .player_no_collision
-   
+
+!ifndef remove_dead_code {   
 !byte $D0,$06
+}
+
 
 .player_walked_into_solid
    jsr flip_bit_3_on_status_of_entity_x
@@ -3588,7 +3670,23 @@ reduce_player_x_lives
 spawn_player
   lda level_number_byte
   lsr
+!ifdef minimum_escalation {
+  cmp #minimum_escalation
+  bcs .minimum_escalation_ok
+  lda #minimum_escalation
+.minimum_escalation_ok:
+}
   sta escalation
+!ifdef show_timing_info {
+  txa
+  pha
+  ldx #5
+  lda escalation
+  jsr display_hex_value
+  pla
+  tax
+}
+  
   stx processing_entity_number
   lda p1_lives, x
   beq .player_dead_dead
@@ -4339,12 +4437,43 @@ init_player_x_shields_and_cooldowns
  
 ;------------------------------------------------------------------
 
+!ifdef show_timing_info {
+
+!zone display_hex_value
+display_hex_value:
+    tay
+    and #$0F
+    clc
+    cmp #10
+    bcc .alpha_1
+    sbc #9
+    !byte $2c
+.alpha_1    
+    adc #NUMBER_TO_PETSCII_ADJUSTMENT
+    sta screen+1, x
+    tya
+    lsr
+    lsr
+    lsr
+    lsr
+    clc
+    cmp #10
+    bcc .alpha_2
+    sbc #9
+    !byte $2c
+.alpha_2
+    adc #NUMBER_TO_PETSCII_ADJUSTMENT
+    sta screen, x
+    rts
+}
+
 !zone post_code_data
   
-msg_banner
+msg_banner:
 
 !text $93,$1C,"    CROSSROADS II : ",$9C,"PANDEMONIUM      " 
- 
+
+
 !byte $1C,$C0,$1E,$20,$00
 
 main_scrolltext:
@@ -4401,21 +4530,37 @@ label_1e9b:
 !byte $04,$07
 
 msg_status_bar_headers:
-!byte $13
-!byte $1C,$50,$4C,$41,$59,$45,$52,$20
-!byte $31,$20,$96,$53,$20,$9E,$4C,$1F
-!byte $20,$20,$20,$48,$49,$47,$48,$20
-!byte $20,$1E,$4C,$45,$56,$45,$4C,$20
-!byte $1C,$50,$4C,$41,$59,$45,$52,$20
-!byte $32,$20,$96,$53,$20,$9E,$4C,$00
+
+!ifndef show_timing_info {
+!text $13,$1C,"PLAYER 1 ",$96,"S ",$9e,"L",$1f,"   HIGH  ",$1e,"LEVEL ",$1c,"PLAYER 2 ",$96,"S ",$9e,"L",$00
+}
+
+!ifdef show_timing_info {
+!text $13,$1C,"ESC      ",$96,"S ",$9e,"L",$1f," SWEEPS   ",$1e," LV  ",$1c,"DIFF     ",$96,"S ",$9e,"L",$00
+}
+
+
+;!byte ,$50,$4C,$41,$59,$45,$52,$20
+;       P   L   A   Y   E   R   _
+;!byte $31,$20,$96,$53,$20,$9E,$4C,$1F
+;       1   _   ctl  
+;!byte $20,$20,$20,$48,$49,$47,$48,$20
+;!byte $20,$1E,$4C,$45,$56,$45,$4C,$20
+;!byte $1C,$50,$4C,$41,$59,$45,$52,$20
+;!byte $32,$20,$96,$53,$20,$9E,$4C,$00
 
 map_start_addresses:
 !byte $00,$00,$37,$6e,$A5
 
 map_colors:
 !byte $02,$04,$05
-!byte $06,$08,$09,$0B,$0E,$00,$00,$04
-!byte $FC,$04,$FC,$00,$00
+!byte $06,$08,$09,$0B,$0E
+
+label_1edb:
+!byte $00,$00,$04,$FC
+
+label_1edf:
+!byte $04,$FC,$00,$00
 
 ; Gives X and Y coordinate offsets represented by each of the four
 ; facings: 0 down, 1 up, 3 right, 4 left. $FF serves as -1.
