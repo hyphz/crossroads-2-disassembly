@@ -40,22 +40,21 @@ Also, some routines - mainly those for loading characters and reading and writin
 code to work around the 6502's limitations on indirect addressing. Fortunately, the original author was kind enough to put 
 meaningful placeholder instructions in the locations in memory where the self-modifying code is built.
 
-### Encrypted credits message
+### Hidden credits message
 
-As mentioned in the interview with Steve Harter at https://kirk.is/2006/04/13/ , the game's author credit ("BY STEVE HARTER") is 
-hidden in Crossroads 2, because Compute! magazine removed the credit from Crossroads 1. The author credit appears in the code at 
-`$1e73`, but it is simply encrypted by adding the value of the corresponding bitmap value from the graphics used for the shield 
-spars (which start at `$1f20`). 
+As mentioned in the interview with Steve Harter at https://kirk.is/2006/04/13/ , the game's author credit is hidden in Crossroads 2, because Compute! magazine removed the credit from Crossroads 1 before publication. The code therefore attempts to hide the credit when normally running the program (as the publishers would before approving it), and display it only if the program is running from the type-in, or from the published disk edition of Compute!
+
+The author credit appears in the code at `$1e73`, but it is simply obfuscated by adding the value of the corresponding bitmap value from the graphics used for the shield spars (which start at `$1f20`). 
 
 The actual display of the credit is controlled by a zero page variable at `$6d`. During initialization, this is set to 
-0, but  it is incremented in two circumstances: if the "VIC extra background color" is `$f6`, or if the first byte after the end 
-of the program (`$21be` by default) is anything other than a zero. (According to the interview this is because, when Compute! 
-printed type-in listings, they padded the end of the program with zeroes, meaning these would appear at the end of the program when 
-it was typed in, but not appear when Compute! magazine ran the image he sent them. Interestingly it DOES appear on most emulators.) 
+0, but it is incremented in two circumstances:
 
-If `$6d` is anything other than 0 then the branch at `$0c09` causes the scrolltext to loop before the credit message appears. If it 
-does not do so, then the text is decrypted by code at `$0b97` which subtracts the appropriate spar image byte from the character 
-code.
+* if the first byte after the end of the program (`$21be` by default) is zero. (According to the interview this is because, when Compute! printed type-in listings, they padded the end of the program with zeroes, meaning these would appear at the end of the program when it was loaded from the type-in)
+* if the "VIC extra background color" is `$f6` (this is presumably the method of "detecting the loader from the disk version of Compute!" that was also mentioned in the interview)
+
+If `$6d` remains 0 then the branch at `$0c09` causes the scrolltext to loop before the credit message appears, meaning the scrolltext reads only "...COPYRIGHT 1988 COMPUTE! MAGAZINE...WELCOME TO PANDEMONIUM...PRESS FIRE BUTTON TO START". If `$6d` has been incremented then a higher character limit is used and the text is deobfuscated as it is displayed, by code at `$0b97` which subtracts the appropriate spar image byte from the character code, adding "...BY STEVE HARTER" at the end of the scrolltext above.
+
+Whether or not the credit appears on emulators differs based on how the emulator models the C64's initial memory state. 
 
 ### Unused text
 
