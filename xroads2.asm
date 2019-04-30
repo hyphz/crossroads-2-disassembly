@@ -136,7 +136,7 @@ game_status_flags               = $4060
 ; AI/Vision buffers - arrays of 4 bytes, one per facing.
 vision_char_seen_indir          = $4061
 vision_dist_seen_indir          = $4065
-vision_saw_critical_type_flag   = $4069
+vision_saw_friendly_flag   = $4069
 ai_direction_votes              = $406d
 ai_fire_bullet_in_direction_score= $407f
 slot_udg_loaded_into            = $4096
@@ -2348,8 +2348,6 @@ label_124f
    lda #$14
    sta $0068, y
    rts
-   
-; ---------------------------------------------------------------------
 
 label_1258
       ldy #$00
@@ -3026,18 +3024,18 @@ label_15ad
    bcc .saw_non_projectile               ; Go to non projectile.
    cmp #et_worm                          ; Is it a worm (which is bullet+1)?
    beq .saw_non_projectile               ; Go to non projectile.
-   ldx last_enemy_processed
+   ldx last_enemy_processed              ; Get our status byte.
    lda entity_status_byte, x
-   and #esb_brave
-   bne label_1600
+   and #esb_brave                        ; Are we "brave" (don't care about other entities?)
+   bne .brave                            ; If so, don't avoid entity.
    jsr apply_double_proximity_penalty_in_direction_y_and_single_in_opposite
 
-label_1600
+.brave
    lda entity_bullet_type, x
    cmp #et_worm
    beq .saw_nothing_interesting
 !ifndef remove_dead_code {
-   beq .generate_407f            ;  bug?? never taken.
+   beq .generate_fire_chance            ;  bug?? never reached, if Z is true, we already branched above.
 }
  
 .saw_non_projectile              ; a should be holding seen enemy type from $15e9.
@@ -3045,17 +3043,17 @@ label_1600
                                  ; type??
    ldx last_enemy_processed
    cmp entity_enemy_type, x      ; Is it the same as me?
-   beq label_161a
+   beq .saw_critical_type
    cmp entity_data_cdlow, x      
-   beq label_161a
+   beq .saw_critical_type
    cmp entity_type_fired_me, x
-   bne label_1634
+   bne .didnt_see_critical_type         
 
-label_161a
-   lda #$01
-   sta vision_saw_critical_type_flag, y
+.saw_critical_type
+   lda #$01                                ; Flag that we saw a critical type in this direction.
+   sta vision_saw_friendly_flag, y
    lda entity_status_byte, x
-   and #esb_randomdirbumps
+   and #esb_randomdirbumps                
    beq .saw_nothing_interesting
    tya
    tax
@@ -3064,52 +3062,55 @@ label_161a
    jsr bump_random_direction_votes
    jmp .saw_nothing_interesting
 
-label_1634
+.didnt_see_critical_type
    ldx vision_entityId_seen_indir, y
    lda entity_enemy_type, x
    cmp #et_vacuum           ; Vacuums are scary because of their death attack.
-   bne label_1648           ; If it was a vacuum we saw..
+   bne .not_vacuum          ; If it was a vacuum we saw..
    lda entity_facing, x     ; If it's facing in this direction..
    tax
    tya
    cmp opposite_facing, x   
    beq .run_away            ; Run away!
 
-label_1648
+.not_vacuum                          ; (Or if vacuum that's not facing this way)
    ldx last_enemy_processed          ; Look at our colorflags
-   lda entity_color_and_flags, x          ; If MSB is not set
-   bpl .approach_or_wander                ; Consider approach, else run away.
+   lda entity_color_and_flags, x     ; If MSB is not set
+   bpl .approach_or_wander           ; Consider approach, else run away.
 
 .run_away
    ldx last_enemy_processed
    jsr apply_double_proximity_penalty_in_direction_y_and_single_in_opposite
-   bne .generate_407f
+   bne .generate_fire_chance
 
 .approach_or_wander
    lda entity_color_and_flags, x
    and #csf_aggressive
-   beq .generate_407f
+   beq .generate_fire_chance
    jsr apply_proximity_bonus_in_direction_y
 
-.generate_407f
-   lda entity_status_byte, x
+.generate_fire_chance                                      
+   lda entity_status_byte, x                       ; Get firing chance from our status byte.
    and #esb_bullet_chance_mask
    sta temp_entity_x_coord
    jsr load_two_low_bits_of_osc3_to_accumulator
-   sec
-   sbc temp_entity_x_coord
-   sta ai_fire_bullet_in_direction_score, y
-   jmp .saw_nothing_interesting
+   sec                                             ; Subtract a random two bit value.
+   sbc temp_entity_x_coord                         ; Later, whether or not we fire will be determined
+   sta ai_fire_bullet_in_direction_score, y        ; by whether the subtracted value was greater than the 
+                                                   ; firing chance.
+   jmp .saw_nothing_interesting                    
 
+; -- Everything above goes back to .saw_nothing_interesting until all directions are checked.
+   
 .end_voting_prefer_existing_avoid_uturn
-   ldx last_enemy_processed
+   ldx last_enemy_processed           ; Find existing direction we're facing.
    lda entity_facing, x
    tax
    tay
-   inc ai_direction_votes, x
-   ldx opposite_facing, y
-   dec ai_direction_votes, x
-   dec ai_direction_votes, x
+   inc ai_direction_votes, x          ; Add one vote to direction we're facing.
+   ldx opposite_facing, y             ; Add two votes against direction we're not facing (ie, avoid 
+   dec ai_direction_votes, x          ;  u-turns if possible.)
+   dec ai_direction_votes, x          ; Note that 1/2 votes is relatively little compared to proximity bonuses.
    jsr bump_random_direction_votes
 
 .tied_best_direction
@@ -3119,104 +3120,104 @@ label_1648
 .most_direction_votes = $fd   
    
 .find_best_direction
-   ldy #$03
-   sty .best_direction
+   ldy #dir_left                       ; Loop through facings again
+   sty .best_direction                 ; Set left (3) as initial best direction
    lda ai_direction_votes, y
    dey
    sta .most_direction_votes
 
 .find_best_direction_loop
-   lda ai_direction_votes, y
-   cmp .most_direction_votes
-   bcc .not_best_direction
-   beq .tied_best_direction
-   sta .most_direction_votes
+   lda ai_direction_votes, y           ; Got votes for this facing 
+   cmp .most_direction_votes           ; Is it more than current best?
+   bcc .not_best_direction             ; Nope, do nothing.
+   beq .tied_best_direction            ; Tie - cast a random vote then restart this loop.
+   sta .most_direction_votes           ; Yes, it's the new best direction.
    sty .best_direction
 
-.not_best_direction
-   dey
-   bpl .find_best_direction_loop
+.not_best_direction                    
+   dey                                 ; Try the next direction 
+   bpl .find_best_direction_loop       ; Repeat until all directions tried.
    
    
-   ldy .best_direction
-   lda vision_dist_seen_indir, y
+   ldy .best_direction                 ; Check what's in the best direction.
+   lda vision_dist_seen_indir, y       ; Is there something next to us in that direction?
    cmp #$01
    bne .nothing_adjacent
    lda vision_char_seen_indir, y
-   beq label_16c3
-   cmp #$1b
+   beq label_16c3                      ; ?? Not sure how it would end up being zero, but hey.
+   cmp #$1b                            ; Open square bracket. Not sure how one of those would show up either.
    bcc label_16c3
-   cmp #c_spar
-   bcs .nothing_adjacent
-   lda #$01
-   sta ai_direction_votes, y
-   bne .find_best_direction
+   cmp #c_spar                         ; Is it a spar or higher? (An player or entity)
+   bcs .nothing_adjacent               ; If so, don't care about it.
+   lda #$01                            ; Otherwise, we screwed up, lower votes in this direction to 1
+   sta ai_direction_votes, y           ; And pick a new best direction.
+   bne .find_best_direction            ; Always taken, but BNE is more efficient than JMP.
 
 label_16c3
-   jmp label_17d9
+   jmp .normal_end_enemy_processing
 
-.nothing_adjacent
-   ldy #dir_left
+.nothing_adjacent                              ; Do we want to fire?
+   ldy #dir_left                               ; Loop through directions.
 
-.consider_firing_loop
-   sty last_facing_for_joystick_position
-   cpy .best_direction
-   beq .dont_fire_direction_were_going
-   jsr consider_firing
+.generate_fire_chance_loop
+   sty last_facing_for_joystick_position            
+   cpy .best_direction                         ; If it's the direction we've decided to move,
+   beq .dont_fire_direction_were_going         ; Don't fire in that direction.
+   jsr consider_firing                         ; Otherwise, go to subroutine to consider firing.
 
 .dont_fire_direction_were_going
    ldy last_facing_for_joystick_position
-   dey
-   bpl .consider_firing_loop
+   dey                                         ; Try next direction.
+   bpl .generate_fire_chance_loop
             
    
-   lda .best_direction
+   lda .best_direction             
    ldx last_enemy_processed
-   cmp entity_facing, x
-   beq .already_facing_best_direction
-   sta entity_facing, x
+   cmp entity_facing, x                        ; See which way we're facing.
+   beq .already_facing_best_direction          ; If we're already facing the target direction, stay that way.
+   sta entity_facing, x                        ; Otherwise, spend this cycle turning.
    jsr draw_entity_x
-   jmp label_1809
+   jmp .maybe_fire_way_we_turned               ; Since we're just turning, maybe firing isn't such a dumb idea.
 
 .already_facing_best_direction
    ldx last_enemy_processed
    ldy .best_direction
-   lda vision_dist_seen_indir, y
-   cmp #$01
-   beq label_174e
-   lda entity_enemy_type, x
+   lda vision_dist_seen_indir, y               ; Second stage adjacency check. 
+   cmp #$01                                    ; We only checked for walls/spars etc, above.                                          
+   beq .saw_entity_adjacent                    
+   lda entity_enemy_type, x                    ; Are we a vacuum?
    cmp #et_vacuum
-   bne label_174b
-
-   lda vision_char_seen_indir, y
-   cmp #c_player
-   bcc .calm_vacuum
-   lda #$03
-   sta entity_upd_countdown, x
+   bne label_174b              
+                                               ; If we are a vacuum..
+   lda vision_char_seen_indir, y               ; What did we see?
+   cmp #c_player                               ; Is it the player or an enemy?
+   bcc .calm_vacuum                            ; If not, calm down.
+   lda #$03                                    ; If yes, chaaaaaarge!
+   sta entity_upd_countdown, x                 ; Set update frequency and cooldown to 3
    sta entity_upd_cooldown, x
-   ldx vision_entityId_seen_indir, y
+   ldx vision_entityId_seen_indir, y           ; Get facing of the thing we saw.
    lda entity_facing, x
    sta $0a
    tay
-   lda opposite_facing, y
-   cmp .best_direction
-   beq label_1729
-   ldy entity_status_byte, x
+   lda opposite_facing, y                      ; Take opposite of that facing.
+   cmp .best_direction                         ; If that's best direction (it's already moving away)
+   beq .already_fleeing_vacuum
+   ldy entity_status_byte, x                   ; If it's between squares
    bmi label_172e
-   ldy .best_direction
-   lda opposite_facing, y
-   sta entity_facing, x
-   jmp draw_entity_x
+   ldy .best_direction                         ; Otherwise, have entity we saw run away.  
+   lda opposite_facing, y                      ; Get opposite of our facing
+   sta entity_facing, x                        ; and turn other entity to face it.
+   jmp draw_entity_x                           ; Then draw it (note: vacuum itself did nothing this cycle)
 
-label_1729
-   lda entity_status_byte, x
-      bpl label_173e
+.already_fleeing_vacuum
+   lda entity_status_byte, x                   ; X is still our target, from $170c above. 
+   bpl label_173e                               
 
 label_172e
    jsr move_forward_and_redraw_entity_x
-      ldx $8d
-   lda entity_status_byte, x
-      ora #esb_secondframe
+   ldx $8d
+   lda entity_status_byte, x                  
+   ora #esb_secondframe
    sta entity_status_byte, x
    jmp draw_entity_x
 
@@ -3224,92 +3225,92 @@ label_173e
    jmp clear_bit_3_on_entity_x_and_draw
 
 .calm_vacuum
-   ldx last_enemy_processed
-   lda #$09
+   ldx last_enemy_processed                      ; Reload ID of vacuum
+   lda #$09                                      ; And set cooldowns to 9 again.
    sta entity_upd_countdown, x
    sta entity_upd_cooldown, x
 
 label_174b
-   jmp label_17e1
+   jmp .maybe_fire_intended_direction
 
-label_174e
-   lda vision_char_seen_indir, y
-      cmp #c_spar
-      bne label_1770
-   inc entity_spars_eaten, x
-   inc entity_shields, x
+.saw_entity_adjacent
+   lda vision_char_seen_indir, y                 ; What did we see adjacent?
+   cmp #c_spar                                   ; Was it a spar?
+   bne label_1770
+   inc entity_spars_eaten, x                     ; We ate it
+   inc entity_shields, x                         ; We get a shield for doing so
    lda entity_enemy_type, x
-      cmp #et_skull
-      bne label_1767
-      lda #$03
+   cmp #et_skull                                 ; Are we a skull?
+   bne .no_skull_speedup                         ; If not, branch. 
+   lda #$03                                      ; If yes, we get a speed up for eating a spar.
    sta entity_upd_cooldown, x
 
-label_1767
-      lda #$04
-         tay
+.no_skull_speedup
+   lda #$04                                      ; Play "spar eaten" sound
+   tay
    jsr sound_related_something
-   jmp label_17e1
+   jmp .maybe_fire_intended_direction
 
 label_1770
       bcs label_1775
    jmp .end_voting_prefer_existing_avoid_uturn
 
 label_1775
-   lda vision_saw_critical_type_flag, y
-      bne label_1794
-   lda vision_entityId_seen_indir, y
-      sta $0a
-      stx entity_number_that_hit_player
+   lda vision_saw_friendly_flag, y          ; Was it a special type?
+   bne .moved_into_special_type
+   lda vision_entityId_seen_indir, y             ; Load collision variables and process collision
+   sta $0a
+   stx entity_number_that_hit_player
    jsr process_collision_between_09_and_0a
-      ldx last_enemy_processed
+   ldx last_enemy_processed
+   lda entity_shields, x                         ; Done with collision, how's our shield?
+   beq .we_died_in_collision                     ; If it's zero, we killed ourselves..
+   ldx $0a                                       ; How's the other guy's shield?
    lda entity_shields, x
-      beq label_17f6
-      ldx $0a
-   lda entity_shields, x
-      beq label_17e1
-      bne label_17d9
+   beq .maybe_fire_intended_direction            ; If we killed them, maybe we could fire this way.
+   bne .normal_end_enemy_processing              ; Otherwise, just continue as normal.
 
-label_1794
-   ldx vision_entityId_seen_indir, y
+.moved_into_special_type
+   ldx vision_entityId_seen_indir, y             ; What type was it?
    lda entity_enemy_type, x
-      cmp #et_tagteam2
-      bne label_17d9
-      ldx last_enemy_processed
-   lda entity_enemy_type, x
-      cmp #et_mutant
-      bne label_17d9
-   lda entity_spars_eaten, x
-         pha
-      lda #$00
+   cmp #et_tagteam2                              ; Was it a tag team?
+   bne .normal_end_enemy_processing              ; If not, just don't move.
+   ldx last_enemy_processed
+   lda entity_enemy_type, x                      ; What type are we?
+   cmp #et_mutant                                ; Are we a mutant?
+   bne .normal_end_enemy_processing              ; Then don't worry.
+   lda entity_spars_eaten, x 
+   pha                                           ; Push number of spars we ate. 
+   lda #$00                                      ; And kill ourselves.
    sta entity_shields, x
-      sty $0a
+   sty $0a                                       ; Save direction we moved into tagmate.
    jsr blank_out_entity_x_nondestructive
-      ldy $0a
-   ldx vision_entityId_seen_indir, y
-   lda entity_status_byte, x
-      and #$80
-         pha
-      lda #$02
+   ldy $0a                                 
+   ldx vision_entityId_seen_indir, y             ; Get creature we moved into.
+   lda entity_status_byte, x                     ; Get its status.
+   and #$80                                      ; Turn off "between squares" flag.
+   pha
+   lda #et_tagteam1                              ; Replace it with a tagteam type 1.
    jsr load_enemy_type_a_data_into_entity_slot_x_with_last_loaded_udg
-         pla
+   pla                                           ; Add its old flags to tagteam type1 flags.
    ora entity_status_byte, x
-      and #$bf
+   and #$bf
    sta entity_status_byte, x
-         pla
-         clc
-   adc entity_spars_eaten, x
-   sta entity_spars_eaten, x
-   jmp draw_entity_x
+   pla
+   clc
+   adc entity_spars_eaten, x                     ; Add spars we previously ate to spars it ate.
+   sta entity_spars_eaten, x                     
+   jmp draw_entity_x                             ; And draw it.
 
-label_17d9
+.normal_end_enemy_processing
       ldx last_enemy_processed
    jsr flip_bit_3_on_status_of_entity_x
    jmp draw_entity_x
 
-label_17e1
-      ldx last_enemy_processed
+.maybe_fire_intended_direction
+   ldx last_enemy_processed
    jsr clear_bit_3_on_entity_x_and_draw
-   jmp label_1809
+   jmp .maybe_fire_way_we_turned
 
 apply_proximity_bonus_in_direction_y
    lda #$28                       ; 40
@@ -3319,7 +3320,7 @@ apply_proximity_bonus_in_direction_y
    adc ai_direction_votes, y
    sta ai_direction_votes, y
 
-label_17f6
+.we_died_in_collision
    rts
 
 ; -------------------------------------------------------------------
@@ -3337,8 +3338,8 @@ apply_proximity_penalty_in_direction_y
 
 ; ------------------------------------------------------------------         
          
-label_1809
-      ldy $0e
+.maybe_fire_way_we_turned
+   ldy .best_direction
 
 consider_firing:
    lda ai_fire_bullet_in_direction_score, y
@@ -3757,7 +3758,7 @@ label_1a1d
    sta ai_direction_votes, y
    lda #$00
    sta vision_dist_seen_indir, y
-   sta vision_saw_critical_type_flag, y
+   sta vision_saw_friendly_flag, y
    sta ai_fire_bullet_in_direction_score, y
    dey
    bpl label_1a1d
