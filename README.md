@@ -6,7 +6,13 @@ Crossroads 2 was (is) an interesting game as it is an early example of a game in
 
 ## Format
 
-The existing ASM file is built with c64studio by George Rottensteiner, at http://www.georg-rottensteiner.de/en/index.html . It reproduces the original PRG file exactly.
+The existing ASM file is built with c64studio by George Rottensteiner, at http://www.georg-rottensteiner.de/en/index.html . 
+
+It reproduces the original PRG file exactly if built with `pristine=1`. There are also a small number of code variations enabled:
+* `always_show_credits`, if set will remove the code that hides the credits so they are always displayed.
+* `minimum_escalation` sets the minimum escalation level (described below). This will make early levels play faster.
+* `remove_dead_code` compiles out a number of apparently unreachable code blocks.
+
 
 ## Notes
 
@@ -77,7 +83,7 @@ it waits (at `$0d2d`) for the end of the current jiffy before proceeding. (Exact
 course.) 
 
 The difficulty starts at 2, but is constantly adjusted during the game. This is done based on the "escalation value", which starts 
-each level at the level number, and increases every 1530 jiffies (or every 25 seconds); this is counted using the second byte of 
+each level at half the level number, and increases every 1530 jiffies (or every 25 seconds); this is counted using the second byte of 
 the jiffy clock, at `$0d0b`. 
 
 The interrupt service routine updates the difficulty every 4 jiffies. Every time the active enemy tracker wraps around, it 
