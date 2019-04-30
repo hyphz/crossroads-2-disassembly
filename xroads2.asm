@@ -1,42 +1,50 @@
 * = $0801
 
-DEFAULT_PLAYER_SHIELDS = 3
-DEFAULT_PLAYER_MOVE_COOLDOWN = 2
-DEFAULT_PLAYER_FIRE_COOLDOWN = 6
-POWEREDUP_PLAYER_MOVE_COOLDOWN = 1
-POWEREDUP_PLAYER_FIRE_COOLDOWN = 4
-SHIELD_SPAR_COLOR = 1
-FIRE_SPAR_COLOR = 2
-SPEED_SPAR_COLOR = 6
-SPARS_TO_WIN_LEVEL = 5
-NO_EXTRA_SPAR_SPAWN_CHANCE = $c8
-MAX_EXTRA_SPAWNED_SPARS = 5
-MAX_PLAYER_SHIELDS = 9
+!zone constants
+  
+DEFAULT_PLAYER_SHIELDS            = 3
+DEFAULT_PLAYER_MOVE_COOLDOWN      = 2
+DEFAULT_PLAYER_FIRE_COOLDOWN      = 6
+POWEREDUP_PLAYER_MOVE_COOLDOWN    = 1
+POWEREDUP_PLAYER_FIRE_COOLDOWN    = 4
+SHIELD_SPAR_COLOR                 = 1
+FIRE_SPAR_COLOR                   = 2
+SPEED_SPAR_COLOR                  = 6
+SPARS_TO_WIN_LEVEL                = 5
+NO_EXTRA_SPAR_SPAWN_CHANCE        = $c8
+MAX_EXTRA_SPAWNED_SPARS           = 5
+MAX_PLAYER_SHIELDS                = 9
 UNENCRYPTED_SCROLLTEXT_CHARACTERS = 96
+NUMBER_TO_PETSCII_ADJUSTMENT      = $30
+PLAYER_SCORE_DIGITS               = 8
 
-pristine = 1
+
+!zone mod_flags
+  
+pristine = 1                 ; Set to exactly rebuild original crossroads 2.prg .
 
 !ifndef pristine {
-  always_show_credits = 1
-  minimum_escalation = 9
-  remove_dead_code = 1
+  always_show_credits = 1    ; Compile out checks for type-in or compute mag and always show credits.
+  minimum_escalation = 9     ; Set minimum escalation to make early levels faster.
+  remove_dead_code = 1       ; Remove several examples of unreachable code.
   ;show_timing_info = 1
 }
 
 
-NUMBER_TO_PETSCII_ADJUSTMENT = $30
-PLAYER_SCORE_DIGITS = 8
+!zone internal_values
 
-
+; Critical character codes.
 c_empty = $20
 c_spar = $3f 
 c_player = $40
 
+; Facing directions.
 dir_down = 0
 dir_up = 1
 dir_right = 2
 dir_left = 3
 
+; Enemy types.
 et_egghead = 0
 et_vacuum = 1
 et_tagteam1 = 2
@@ -58,17 +66,16 @@ et_bullet = 17
 et_worm = 18
 et_spear = 19
 
+; Special enemy IDs.
 eid_last_player = $1
-
 eid_first_enemy = $0c
 
 ; Offset $7FF for BC4
-
  
-; HARDWARE ADDRESSES
 
 !zone hardware_addresses
 
+; C64 Hardware addresses.
 ram_rom_mapping          = $01
 jiffy255_clock           = $a1
 jiffy_clock              = $a2
@@ -76,7 +83,6 @@ pressed_key_code         = $cb
 stack                    = $0100
 screen                   = $0400
 vic_sprite_pointer_array = $07f8
-
 
 character_rom_base       = $d000  ; When mapped by ram_rom_mapping
 vic_sprite_coord_array   = $d000
@@ -117,55 +123,59 @@ sound_buffer          = $1f46
 copy_of_character_rom = $2800
 udgs_base             = $2a00
 
-explosion_or_implosion     = $4020
-explosion_status      = $4028
-explosion_count_up_array = $4030
-explosion_base_sprite_pointer = $4040
-explosion_sprite_pointer_offset     = $4048
-exploding_entity_index= $4058
-game_status_flags   = $4060
-slot_udg_loaded_into  = $4096
+; Explosion status bytes; arrays of 8 bytes, one per possible explosion.
+explosion_or_implosion          = $4020
+explosion_status                = $4028
+explosion_count_up_array        = $4030
+explosion_base_sprite_pointer   = $4040
+explosion_sprite_pointer_offset = $4048
+exploding_entity_index          = $4058
 
-; Entity maps. 
-; Entities 0 and 1 are player
-; 2-12 are player bullets
-; 13+ are enemies
+game_status_flags               = $4060
 
-vision_char_seen_indir = $4061
-vision_dist_seen_indir = $4065
-vision_saw_critical_type_flag = $4069
-ai_direction_votes     = $406d
-ai_fire_bullet_in_direction_score = $407f
-vision_entityId_seen_indir = $40ae
+; AI/Vision buffers - arrays of 4 bytes, one per facing.
+vision_char_seen_indir          = $4061
+vision_dist_seen_indir          = $4065
+vision_saw_critical_type_flag   = $4069
+ai_direction_votes              = $406d
+ai_fire_bullet_in_direction_score= $407f
+slot_udg_loaded_into            = $4096
+vision_entityId_seen_indir      = $40ae
 
+; Entity maps. Entities 0 and 1 are player, 2-12 are player bullets, 13+ are enemies.
+; Each is an array of 255 values, although it is unlikely 255 entities would be viable.
 entity_enemy_type     = $4100        ; Index into enemy type lists.
 entity_base_charno    = $4200
 entity_bullet_type    = $4300        ; Type of bullet we fire. If MSB set, we _are_ a bullet.
-entity_color_and_flags= $4400
-entity_status_byte    = $4500
-entity_shields        = $4600
+entity_color_and_flags= $4400        ; Four bits color, four bits AI flags.
+entity_status_byte    = $4500        ; See bitmap below.
+entity_shields        = $4600        ; Number of shields entity has.
 p2_shields            = $4601
-entity_upd_cooldown   = $4700
-entity_vision_distance= $4800
+entity_upd_cooldown   = $4700        ; Frequency with which entity is updated.
+entity_vision_distance= $4800        ; Number of squares vision routine scans ahead.
 entity_data_cdlow     = $4900
 entity_type_fired_me  = $4a00
-entity_bullet_speed   = $4b00
-entity_score_awarded  = $4c00
-entity_upd_countdown  = $4d00
-entity_x_coords       = $4e00
-entity_y_coords       = $4f00
-entity_spars_eaten    = $5000
-entity_facing         = $5100
+entity_bullet_speed   = $4b00        ; Frequency with which entity's bullets are updated.
+entity_score_awarded  = $4c00        ; Score value for entity.
+entity_upd_countdown  = $4d00        ; Used to count down loops until next update.
+entity_x_coords       = $4e00        ; X coordinate.
+entity_y_coords       = $4f00        ; Y coordinate.
+entity_spars_eaten    = $5000        ; How many spars entity has eaten and should drop on death.
+entity_facing         = $5100        ; Direction being faced
 
-screen_line_address_lowbytes = $6000
+screen_line_address_lowbytes  = $6000 ; Array of screen line addresses built during initialization.
 screen_line_address_highbytes = $6019
-player_1_score_digits = $6040
-player_2_score_digits = $6048
-high_score_digits     = $6050
+player_1_score_digits         = $6040 ; Player 1, player 2, and high score in BCD.
+player_2_score_digits         = $6048
+high_score_digits             = $6050
 
-entity_id_buffer         = $c000
+; Entity_id_buffer: 2D array the same size as screen, where each byte holds the entity-id of the 
+; entity that was most recently in that cell. Note that they are not cleared when the entity moves
+; on, because this should only be used when a collision is confirmed on the screen.
+entity_id_buffer              = $c000
 
 
+; It's a 6502 game. It loves zero page global variables.
 temp_entity_x_coord               = $03
 last_facing_for_joystick_position = $04
 processing_entity_number          = $05
@@ -177,15 +187,15 @@ p1_lives                          = $11
 p2_lives                          = $12
 p1_shields_copy                   = $14
 p2_shields_copy                   = $15
-last_entity_killed_by_overpopulation                     = $39
-enemy_sweep_count                 = $3c
-escalation                        = $3f
-difficulty                        = $41
+last_entity_killed_by_overpopulation = $39
+enemy_sweep_count                 = $3c ; How many times enemy update looped in last 4-jiffy period.
+escalation                        = $3f ; Target number of enemy updates in 4-jiffy period, increases with time.
+difficulty                        = $41 ; Number of times enemy update loop repeats before waiting.
 udg_number_to_load                = $44
-interrupt_counter                 = $46
+interrupt_counter                 = $46 ; Number of times ISR has run.
 level_units_b                     = $47
 max_enemy_entity                  = $48
-player_move_cooldown_counter      = $49
+player_move_cooldown_counter      = $49 ; 
 level_number_byte                 = $4b
 oldest_bullet_entity_id           = $4c
 player_fire_cooldown_counter      = $4e
@@ -204,7 +214,7 @@ udg_slot_to_load_to               = $b9
 player_fire_cooldown              = $be
 current_map_color                 = $c3
 current_wall_character            = $c4
-var_a_init_zero                   = $c9
+last_processed_explosion          = $c9
 current_spar_frame                = $ca
 extra_enemy_spawn_chance          = $d7
 
@@ -214,6 +224,9 @@ extra_enemy_spawn_chance          = $d7
 ; Bit 6/$20  = 1 = immune to damage
 esb_frozen             = $40 ; ( If set, $1572 and $185d jump out of entity's loop before processing. ) 
 esb_invulnerable       = $20 ; ( If set, $1c17 and $1c50 skip steps that would reduce entity's shield. )
+esb_brave              = $10 ; ( If set, $15fb skips applying direction penalty for sighted entities. )
+esb_randomdirbumps     = $08 ; ( If set, $1622 bumps current direction and randoms when critical seen. )
+esb_secondframe        = $04 ; ( If set, $1292 offsets character used for entity. )
 esb_bullet_chance_mask = $03 ; ( Masked off at $166d and a random 2-bit value is subtracted; if it goes 
                              ;   negative, fire. )
 
@@ -224,7 +237,6 @@ esb_bullet_chance_mask = $03 ; ( Masked off at $166d and a random 2-bit value is
 csf_aggressive     = $40   ;  ( If 1, $165b adds proximity bonus when non-vacuum entity seen )
 csf_visible        = $20   ;  ( If 0, $1273 sets drawing color to 0 )
 csf_collects_spars = $10   ;  ( If 1, $15db applies direction votes when spars seen )
-csf_semirandom     = $08  
 
 ;to "xroads2.d64", d64
 !to "xroads2.prg", cbm
@@ -232,18 +244,6 @@ csf_semirandom     = $08
 
 !basic entry
 
-;!byte %....#.##
-;!byte %....#...  
-;!byte %....#.#.
-;!byte %........
-;!byte %#..####. 
-;!byte %..##..#.
-;!byte %..##.#..
-;!byte %..##.#..
-;!byte %..##.#.#  
-;!byte %........
-;!byte %........
-;!byte %........
 
 
 !zone character_graphics
@@ -840,22 +840,22 @@ label_0a01
  
 ; Add each value in $500 array to parallel value in $400 array. 
  
- lda $0400, x
+ lda screen, x
  clc
- adc $0500, x
- sta $0400, x
+ adc screen+$100, x
+ sta screen, x
  
 ; Add each value in $580 array to parallel value in $480 array.
 
- lda $0480, x
+ lda screen+$80, x
  clc
- adc $0580, x
- sta $0480, x
+ adc screen+$180, x
+ sta screen+$80, x
 
 label_0a20
  lda $06             ; This was set to 3 above.
  bne label_0a55
- lda $0400, x
+ lda screen, x
  bmi label_0a55
  pha
  and #$07            
@@ -867,11 +867,11 @@ label_0a20
  sta $fc
  lda onebit_masks_zero_is_msb, y
  sta $fd
- lda $0480, x
+ lda screen+$80, x
  bmi label_0a55
  asl
  clc
- adc $0480, x
+ adc screen+$80, x
  adc $fc
  tay
  jsr self_modified_lda_plus_y
@@ -1104,7 +1104,7 @@ label_0b88
    bne label_0b88
 
 label_0ba8
-   sta $044e
+   sta screen+$4e
       lda $3a
    sta $d84e
       lda $53
@@ -1137,7 +1137,7 @@ handle_player_2_joystick
   beq label_0bf2
   and #$10                     ; Is fire button down?
   bne label_0bef
-  lda $0426                    ; L of Player 2 lives display??
+  lda screen+$26               ; L of Player 2 lives display??
   cmp #c_empty
   beq label_0bf2
   bne label_0c2b
@@ -1239,7 +1239,7 @@ per_level_init
    bne .loop_clear_shields
    
    
-   sta var_a_init_zero
+   sta last_processed_explosion
    sta spars_spawned_by_0d33
    lda #$02
    sta oldest_bullet_entity_id
@@ -2400,7 +2400,7 @@ label_1279
 
 label_128f
    lda entity_status_byte, x
-   and #$04
+   and #esb_secondframe
    beq .no_charno_offset
    inc char_to_write
    inc char_to_write
@@ -2509,14 +2509,14 @@ label_1328
       bpl label_130d
 
 label_132b
-      ldx var_a_init_zero
+      ldx last_processed_explosion
          inx
       cpx #$08
       bcc label_1334
       ldx #$00
 
 label_1334
-      stx var_a_init_zero
+      stx last_processed_explosion
    lda explosion_or_implosion, x
       beq label_132b
 
@@ -3028,7 +3028,7 @@ label_15ad
    beq .saw_non_projectile               ; Go to non projectile.
    ldx last_enemy_processed
    lda entity_status_byte, x
-   and #$10
+   and #esb_brave
    bne label_1600
    jsr apply_double_proximity_penalty_in_direction_y_and_single_in_opposite
 
@@ -3055,7 +3055,7 @@ label_161a
    lda #$01
    sta vision_saw_critical_type_flag, y
    lda entity_status_byte, x
-   and #$08
+   and #esb_randomdirbumps
    beq .saw_nothing_interesting
    tya
    tax
@@ -3216,7 +3216,7 @@ label_172e
    jsr move_forward_and_redraw_entity_x
       ldx $8d
    lda entity_status_byte, x
-      ora #$04
+      ora #esb_secondframe
    sta entity_status_byte, x
    jmp draw_entity_x
 
@@ -4350,7 +4350,7 @@ clear_bit_3_on_entity_x_and_draw
  
 flip_bit_3_on_status_of_entity_x
    lda entity_status_byte, x
-   eor #$04
+   eor #esb_secondframe
    sta entity_status_byte, x
    rts
 
