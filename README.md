@@ -11,12 +11,11 @@ The existing ASM file is built with c64studio by George Rottensteiner, at http:/
 It reproduces the original PRG file exactly if built with `pristine=1`. There are also a small number of code variations enabled:
 * `always_show_credits`, if set will remove the code that hides the credits so they are always displayed.
 * `minimum_escalation` sets the minimum escalation level (described below). This will make early levels play faster.
-* `remove_dead_code` compiles out a number of apparently unreachable code blocks.
-
+* `remove_dead_code` compiles out a number of apparently unreachable code blocks (see below)
 
 ## Notes
 
-Labels are being amended as I work out what they mean, as are local variables on the zero page. 
+Labels are being amended as I work out what they mean, as are local and global variables on the zero page. 
 
 ### Dissassembly
 
@@ -46,6 +45,20 @@ Also, some routines - mainly those for loading characters and reading and writin
 code to work around the 6502's limitations on indirect addressing. Fortunately, the original author was kind enough to put 
 meaningful placeholder instructions in the locations in memory where the self-modifying code is built.
 
+### Dead or confused code
+
+There are a couple of sections of code which are never reached. It's not clear if these are actual bugs or potential transcription errors (since this was a type-in there are likely to be plenty of opportunities for those).
+
+* Unreachable `jsr $0f58` at `$0ea4`. This is a call to update the status bar, immediately before the routine that draws the map. It's possible that the author realized this wasn't needed and moved the jump address forward at some point.
+
+* Unreachable `tax` at `$1268`, immediately before the routine that draws an entity. The drawing entity code takes the entity ID to draw in register X, so it looks like this would have allowed it to be in the accumulator instead, but this variant was never used.
+
+* Unreachable `bne $1959` at `$1951`. This seems to imply that the `jmp $1959` immediately before was originally a `beq` somewhere else.
+
+* `lda $4500, x; and #$fb; sta $4500, x` at `$1d7d` is immediately followed by a `jsr $1992` which does the same thing again in code at `$199a`. This is related to flipping which animation frame is shown for an entity.
+
+* Two consecutive `beq`s at `$1605` and `$1607`, means the second one can never be taken. This is probably the strangest of the lot; it is within the "enemy AI" routine, specifically an enemy's reaction to seeing a bullet within its vision range. Due to the second `beq` the code enters the routine at `$1609` which normally runs if no projectile is seen, and does so with the accumulator still holding the target bullet type, whereas `$1609` normally assumes it to hold the type of the active enemy. If this is changed to `bne` as was possibly intended, the effect on enemy behaviour is not clearly observed.
+
 ### Hidden credits message
 
 As mentioned in the interview with Steve Harter at https://kirk.is/2006/04/13/ , the game's author credit is hidden in Crossroads 2, because Compute! magazine removed the credit from Crossroads 1 before publication. The code therefore attempts to hide the credit when normally running the program (as the publishers would before approving it), and display it only if the program is running from the type-in, or from the published disk edition of Compute!
@@ -61,11 +74,6 @@ The actual display of the credit is controlled by a zero page variable at `$6d`.
 If `$6d` remains 0 then the branch at `$0c09` causes the scrolltext to loop before the credit message appears, meaning the scrolltext reads only "...COPYRIGHT 1988 COMPUTE! MAGAZINE...WELCOME TO PANDEMONIUM...PRESS FIRE BUTTON TO START". If `$6d` has been incremented then a higher character limit is used and the text is deobfuscated as it is displayed, by code at `$0b97` which subtracts the appropriate spar image byte from the character code, adding "...BY STEVE HARTER" at the end of the scrolltext above.
 
 Whether or not the credit appears on emulators differs based on how the emulator models the C64's initial memory state. 
-
-### Unused text
-
-Within the text block are the message "PLAYERS 1" and "PLAYERS 2" which are never used. These are possibly left over from the 
-previous game?
 
 ### Timing
 
