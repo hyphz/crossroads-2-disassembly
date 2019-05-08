@@ -15,9 +15,10 @@ NO_EXTRA_SPAR_SPAWN_CHANCE        = $c8
 MAX_EXTRA_SPAWNED_SPARS           = 5
 MAX_PLAYER_SHIELDS                = 9
 UNENCRYPTED_SCROLLTEXT_CHARACTERS = 96
+TOTAL_SCROLLTEXT_CHARACTERS       = UNENCRYPTED_SCROLLTEXT_CHARACTERS + 19
 NUMBER_TO_PETSCII_ADJUSTMENT      = $30
 PLAYER_SCORE_DIGITS               = 8
-
+INITIAL_SPAR_COUNT                = 5
 
 !zone mod_flags
   
@@ -27,6 +28,7 @@ pristine = 1                 ; Set to exactly rebuild original crossroads 2.prg 
   always_show_credits = 1    ; Compile out checks for type-in or compute mag and always show credits.
   minimum_escalation = 9     ; Set minimum escalation to make early levels faster.
   remove_dead_code = 1       ; Remove several examples of unreachable code.
+  spawn_keys = 1
   ;show_timing_info = 1
 }
 
@@ -809,15 +811,15 @@ label_09db
   lda #$ff
 
 label_09e5
-  sta $0580, x
+  sta screen+$180, x
 ; Result: $500 and $580 are now sequences of random values that are
 ; 0, 1, or ff; and where $500's is non zero if $580's is. 
   
   lda sid_voice3_oscillator_ro
   and #$0f    ; Random value 0-15..
   adc #$05    ; +5.
-  sta $0600, x  ; Identical in $600 and $680 arrays.
-  sta $0680, x
+  sta screen+$200, x  ; Identical in $600 and $680 arrays.
+  sta screen+$280, x
   dex              
   bpl generate_random_arrays_loop 
   
@@ -833,10 +835,10 @@ label_09ff
  ldx #$31
 
 label_0a01
- dec $0680, x
+ dec screen+$280, x
  bpl label_0a20
- lda $0600, x
- sta $0680, x
+ lda screen+$200, x
+ sta screen+$280, x
  
 ; Add each value in $500 array to parallel value in $400 array. 
  
@@ -919,17 +921,18 @@ label_0a6e
 copy_character_rom
  lda character_rom_base-1, x
  sta copy_of_character_rom-1, x
- lda $d0eb, x        ; VICII register image??
- sta $28eb, x
+ lda character_rom_base+$eb, x        ; VICII register image??
+ sta copy_of_character_rom+$eb, x
  dex
  bne copy_character_rom
+ 
+ 
  ldx #$3f
-
-label_0a8c
+.load_walls
  lda walls, x
- sta $2930, x
+ sta copy_of_character_rom+$130, x
  dex
- bpl label_0a8c
+ bpl .load_walls
  
  
  lda #%01110111
@@ -1003,7 +1006,7 @@ label_0ab7
  stx spar_animation_timer             
 
  
-generate_multiples_array
+generate_screen_line_address_array:
  sta screen_line_address_lowbytes, y          ; a=0
  pha                   ; pushed a
  txa                   ; 4
@@ -1014,11 +1017,11 @@ generate_multiples_array
  pla                   ; pulled a (0)
  clc
  adc #$28              ; adding 40 
- bcc generate_multiples_array
+ bcc generate_screen_line_address_array
  inx
- bcs generate_multiples_array
+ bcs generate_screen_line_address_array
 
-install_isr
+install_isr:
  sei  ;disable interrupts
  lda #<interrupt_service_routine   ; load address of our ISR
  sta $0314
@@ -1026,7 +1029,7 @@ install_isr
  sta $0315
  cli ;and restart interrupts
 
-title_screen_init
+title_screen_init:
    jsr clear_explosions
    ldx #$07
    stx last_enemy_processed
@@ -1034,14 +1037,14 @@ title_screen_init
    stx spar_animation_timer
    sta game_status_flags
 
-.clear_player_scores
+.clear_player_scores:
   sta player_1_score_digits, x
   sta player_2_score_digits, x
   dex
   bpl .clear_player_scores
 
   tax
-.clear_entities
+.clear_entities:
   sta entity_shields, x
   sta entity_spars_eaten, x
   inx
@@ -1060,29 +1063,34 @@ title_screen_init
   jsr output_string_at_yyaa_until_zero_or_quote
   jsr draw_new_map
   
+   
    ldx #$0f
-
-label_0b6c
+display_start_at_level:
    lda msg_start_at_level, x
    sta screen+$214, x
    lda #$0a
    sta colors+$214, x
    dex
-   bpl label_0b6c
+   bpl display_start_at_level
    jsr reset_entity_count_and_udgs
 
-label_0b7d
+.reset_and_update_scrolltext
     ldx #$00
 
-label_0b7f
-    stx $53
-    lda #<label_1e96
-    ldy #>label_1e96
+.scrolltext_position = $53
+.last_scrolltext_color_code = $3a
+    
+; Scroll existing text to the left. Rather than updating the screen, just have the kernel print
+; routine print a series of characters that perform a backspace delete on the left hand character!
+.update_scrolltext
+    stx .scrolltext_position
+    lda #<scroll_left_control_codes
+    ldy #>scroll_left_control_codes
     jsr output_string_at_yyaa_until_zero_or_quote
 
-label_0b88
+.fetch_new_scrolltext_end
     lda #$00
-    ldx $53                                     ; Get scrolltext position
+    ldx .scrolltext_position                    ; Get scrolltext position
     cpx #UNENCRYPTED_SCROLLTEXT_CHARACTERS      ; Are we within the unencrypted section?
     bcc .no_credit_decrypt
     txa                                         ; No. Move X, position we're on, to A
@@ -1093,86 +1101,106 @@ label_0b88
     sbc spar_images, y                          ; Initialize accumulator with the negative value from the 
                                                 ; spar images corresponding to the position in the encrypted
                                                 ; text
-
 .no_credit_decrypt:
    clc
-   adc main_scrolltext, x
-   cmp #$f0
-   bcc label_0ba8
-   sta $3a
-   inc $53
-   bne label_0b88
+   adc main_scrolltext, x                       ; Add scrolltext character value to accumulator - it will
+                                                ; be 0 or negative key, as set above
+   cmp #$f0                                     ; Is the "character" actually a color code?
+   bcc .scrolltext_not_control_char             ; No, display it as normal.
+   sta .last_scrolltext_color_code              ; Yes, store it as current scrolltext color code.
+   inc .scrolltext_position                     ; And manually advance to next character, since we don't 
+   bne .fetch_new_scrolltext_end                ; scroll on color codes.
 
-label_0ba8
-   sta screen+$4e
-      lda $3a
-   sta $d84e
-      lda $53
-      and #$01
-      beq label_0bf2
-      ldx pressed_key_code
-      cpx #$03
-      bne label_0bbf
-   jmp title_screen_init
+.scrolltext_not_control_char
+   sta screen+$4e                               ; Put new character at end of scrolltext line
+   lda .last_scrolltext_color_code              ; Load last color code and set color of new character
+   sta colors+$4e
+   lda .scrolltext_position                     ; Is it an odd numbered character?
+   and #$01                          
+   beq .title_screen_done_joysticks             ; If so, skip handling keys and joysticks.
+   ldx pressed_key_code                         ; Get pressed key
+   cpx #$03                                     ; Is F7 pressed?
+   bne .handle_keyboard_title_screen
+   jmp title_screen_init                        ; If so, reinitialize.
 
-label_0bbf
-   lda $eb81, x                 ; Unshifted character table?
-   cmp #$31
-   bcc label_0bcd
-   cmp #$3a
-   bcs label_0bcd
-   sta $0623
+.handle_keyboard_title_screen
+   lda $eb81, x                 ; Use built in table to convert keyboard key to PETSCII.
+   cmp #$31                     ; Is it less than 1?
+   bcc .invalid_key             ; If so, don't do anything.
+   cmp #$3a                     ; Is it more than or equal to colon (the character after 9)?
+!ifndef spawn_keys {
+   bcs .invalid_key             ; If so, don't do anything.
+}
+!ifdef spawn_keys {
+   bcs .spawn_key
+}
+   sta screen+$223                    ; Place it on the screen in the "start at level" slot.
+!ifdef spawn_keys {
+   bcc .invalid_key
 
-label_0bcd
+.spawn_key
+   cmp #$41
+   bcc .invalid_key
+   clc
+   sbc #$41
+   cmp #et_player
+   bcs .invalid_key
+   pha
+   jsr set_xy_to_random_empty_space_coord
+   pla
+   jsr spawn_enemy_type_a_at_position_xy
+}
+ 
+.invalid_key
   lda port_2_joystick
-  cmp #%01111111               ; Is joystick idle?
-  beq handle_player_2_joystick
-  and #%00010000               ; Is fire button down?
-  beq label_0c2b
-  jsr toggle_2_player_indicator
+  cmp #%01111111                 ; Is joystick idle?
+  beq handle_player_2_joystick   ; Yes, move on to player 2 joystick.
+  and #%00010000                 ; Is fire button down?
+  beq start_game                 ; Yes, start game.
+  jsr toggle_2_player_indicator  ; Other than fire. Toggle 2 player mode.
 
 handle_player_2_joystick
   lda port_1_joystick
   cmp #$ff                     ; Joystick idle / timer bits??
-  beq label_0bf2
+  beq .title_screen_done_joysticks
   and #$10                     ; Is fire button down?
-  bne label_0bef
-  lda screen+$26               ; L of Player 2 lives display??
-  cmp #c_empty
-  beq label_0bf2
-  bne label_0c2b
+  bne .player_2_non_fire       ; No, but joystick not idle, so joystick move
+  lda screen+$26               ; Are we in 2 player mode?
+  cmp #c_empty                      
+  beq .title_screen_done_joysticks  ; No, ignore fire on 2nd joystick.
+  bne start_game                    ; Yes, 2nd player fire starts game.
 
-label_0bef
+.player_2_non_fire
    jsr toggle_2_player_indicator
 
-label_0bf2
+.title_screen_done_joysticks:
    lda #$08
    sta $61
    lda #$00
    sta jiffy_clock
 
-label_0bfa
+.title_screen_loop:
    lda jiffy_clock
    cmp $61
-   bcc label_0c15
-   ldx $53
+   bcc .not_time_for_scrolltext
+   ldx .scrolltext_position
    inx
    cpx #UNENCRYPTED_SCROLLTEXT_CHARACTERS
-   bcc label_0c12
+   bcc .dont_reset_scrolltext
    lda show_credits
-   beq label_0c0f
-   cpx #$73
-   bcc label_0c12
+   beq .reset_scrolltext
+   cpx #TOTAL_SCROLLTEXT_CHARACTERS
+   bcc .dont_reset_scrolltext
 
-label_0c0f
-   jmp label_0b7d
+.reset_scrolltext
+   jmp .reset_and_update_scrolltext
 
-label_0c12
-   jmp label_0b7f
+.dont_reset_scrolltext
+   jmp .update_scrolltext
 
-label_0c15
+.not_time_for_scrolltext
    jsr game_loop_enemies
-   jmp label_0bfa
+   jmp .title_screen_loop
 
 ; --------------------------------------------------------------------   
    
@@ -1192,7 +1220,7 @@ toggle_2_player_indicator
 ; --------------------------------------------------------------------   
 ; LIKELY GAME SETUP ROUTINE   
 
-label_0c2b
+start_game:
    ldx #$00
    ldy #$04
    sty p1_lives
@@ -1200,27 +1228,27 @@ label_0c2b
    lda screen+$26   ; Are we in 2 player mode (second player icon in
    cmp #c_player    ; top left of screen?)
    beq .start_2player
-   ldy #$00         ; IF not, give player 2 zero lives
+   ldy #$00         ; If not, give player 2 zero lives
 
-.start_2player
+.start_2player:
    sty p2_lives
    inx
    jsr init_player_x_shields_and_cooldowns
-   lda screen+$223  ; Digit of level to start at
+   lda screen+$223                  ; Digit of level to start at
    sec
-   sbc #$30         ; Subtract PETSCII offset to get actual number
+   sbc #$30                         ; Subtract PETSCII offset to get actual number
    sta level_bcd_units
    sta level_units_b
    sta level_number_byte
-   lda #<msg_status_bar_headers         ; Display top status line
+   lda #<msg_status_bar_headers     ; Display top status line
    ldy #>msg_status_bar_headers
    jsr output_string_at_yyaa_until_zero_or_quote
    ldx #$27
 
-.setup_lower_status_line_loop
-   lda colors, x      ; Copy color info from top status line to bottom
+.setup_lower_status_line_loop:
+   lda colors, x                    ; Copy color info from top status line to bottom
    sta colors+$28, x
-   lda #$20           ; Also blank bottom status line
+   lda #c_empty                     ; Also blank bottom status line
    sta screen+$28, x
    dex
    bpl .setup_lower_status_line_loop
@@ -1228,9 +1256,9 @@ label_0c2b
    jsr draw_new_map
    jsr update_status_bar
 
-per_level_init
+per_level_init:
 
-   ; Clear shields to 0 on all entities.
+   ; Clear shields to 0 on all entities (this marks them as unused)
    lda #$00
    tax
 .loop_clear_shields
@@ -1254,22 +1282,22 @@ per_level_init
    sta extra_enemy_spawn_chance
 
 label_0c8c
-   ldx #$0c
-   stx last_enemy_processed
-   dex
+   ldx #eid_first_enemy                      ; Initialize enemy processing to start at first enemy
+   stx last_enemy_processed    
+   dex                                       ; Initialize enemy overflow to start at first enemy
    stx last_entity_killed_by_overpopulation
    jsr reset_entity_count_and_udgs
    
    ; Check if player 1 is alive.
-   lda p1_lives               ; Get player 1 lives
-   beq .player_1_dead         ; Jump ahead if equal to 0.
+   lda p1_lives                              ; Get player 1 lives
+   beq .player_1_dead                        ; Jump ahead if equal to 0.
    ; Spawn player 1.
    ldx #$00
    jsr spawn_player
 .player_1_dead
    ; Check if player 2 is alive.
-   lda p2_lives              ; Get player 2 lives
-   beq .spawn_initial_spars   ; Jump ahead if equal to 0.
+   lda p2_lives                              ; Get player 2 lives
+   beq .spawn_initial_spars                  ; Jump ahead if equal to 0.
    ; Spawn player 2
    ldx #$01
    jsr spawn_player
@@ -1277,7 +1305,7 @@ label_0c8c
    ; Spawn initial spars.
 .initial_spars_to_spawn = $fe   
 .spawn_initial_spars
-   lda #$05                         ; Set up counter left to spawn.
+   lda #INITIAL_SPAR_COUNT                  ; Set up counter left to spawn.
    sta .initial_spars_to_spawn
 
 .spawn_initial_spars_loop
@@ -1298,9 +1326,9 @@ label_0c8c
   
 game_loop:
    ldy pressed_key_code
-   cpy #$06                ; Is F5, Pause, being pressed?
-   bne label_0cdc          ; No, skip ahead.
-   lda game_status_flags   ; Yes, flip paused bit.
+   cpy #$06                                ; Is F5, Pause, being pressed?
+   bne .no_pause                           ; No, skip ahead.
+   lda game_status_flags                   ; Yes, flip paused bit.
    eor #$01
    sta game_status_flags
    
@@ -1308,18 +1336,18 @@ game_loop:
    ; pause being constantly switched back and forth if the player holds F5 
    ; for more than 1/60 of a second.
 .target_jiffytime = $fc
-wait_16jiffies
+wait_16jiffies:
   lda jiffy_clock           ; Get jiffy clock value
   clc                       ; Add 16
   adc #$0f                  
   sta .target_jiffytime     ; Note target time to finish waiting
 
-.wait_16jiffies_loop
+.wait_16jiffies_loop:
   lda jiffy_clock           ; Loop reading jiffy clock
   cmp .target_jiffytime     ; Until it reaches target time 
   bne .wait_16jiffies_loop  ; If it hasn't yet, continue loop.
 
-label_0cdc
+.no_pause:
    lda game_status_flags
    beq .not_paused
    
@@ -1346,7 +1374,7 @@ label_0cdc
    jsr update_player_bullets
    jmp game_loop_players          ; Go to game loop part 2, players
 
-game_loop_reentry_from_players    ; .. Player handling branches back here
+game_loop_reentry_from_players:   ; .. Player handling branches back here
    lda jiffy255_clock             ; Check coarse timer 
    bmi done_escalation            ; If it's not reached zero, don't escalate yet.
    lda #$f9                       ; Reset to reach zero again in 7 ticks.
@@ -1387,22 +1415,23 @@ done_escalation:
    cmp .target_jiffytime
    beq .wait_for_jiffy
 
-.fast_update
-   jsr game_loop_enemies
+.fast_update                               ; Actual update code.
+   jsr game_loop_enemies                   ; Update enemies.
    
-   lda sid_voice3_oscillator_ro
-   bne .dont_spawn_spar
-   lda sid_voice3_oscillator_ro
-   cmp #NO_EXTRA_SPAR_SPAWN_CHANCE
-   bcc .dont_spawn_spar
-   lda spars_spawned_by_0d33
-   cmp #MAX_EXTRA_SPAWNED_SPARS
-   bcs .dont_spawn_spar
-   inc spars_spawned_by_0d33
-   jsr set_xy_to_random_empty_space_coord
-   lda #c_spar
+; Maybe spawn an extra spar.
+   lda sid_voice3_oscillator_ro            ; Get a random value.
+   bne .dont_spawn_spar                    ; If not 0, don't spawn an extra spar.
+   lda sid_voice3_oscillator_ro            ; Get another random value.
+   cmp #NO_EXTRA_SPAR_SPAWN_CHANCE         ; Compare it to extra spar spawn chance.
+   bcc .dont_spawn_spar                    ; If lower, don't spawn.
+   lda spars_spawned_by_0d33               ; How many extra spars have we spawned so far?
+   cmp #MAX_EXTRA_SPAWNED_SPARS            ; Have we reached the maximum?
+   bcs .dont_spawn_spar                    ; If so, don't spawn more.
+   inc spars_spawned_by_0d33               ; We're going to spawn one more.
+   jsr set_xy_to_random_empty_space_coord  ; Pick a random empty spot
+   lda #c_spar                             ; Put a spar there
    jsr write_a_to_screen_position_xy
-   jsr select_random_spar_type
+   jsr select_random_spar_type             ; And color it randomly.
 
 .dont_spawn_spar
    jmp game_loop
@@ -4339,7 +4368,7 @@ clear_bit_3_on_entity_x_and_draw
    stx .stored_x_value
    lda entity_status_byte, x
    and #$fb  ; Clear bit 3
-   sta entity_status_byte, x
+   sta entity_status_byte, x      ; Oddly the JSR below does this, too.
    jsr flip_top_bit_and_clear_third_bit_of_entity_x_status
    jsr draw_entity_x
    ldx .stored_x_value
@@ -4524,8 +4553,12 @@ msg_start_at_level:
 ;     _   L   E   V   E   L   _  
 
 
-label_1e96:
-!byte $13,$11,$1D,$14,$00
+scroll_left_control_codes:
+!byte $13   ; Home
+!byte $11   ; Cursor Down
+!byte $1D   ; Cursor Right
+!byte $14   ; Delete
+!byte $00   ; End marker
 
 label_1e9b:
 !byte $04,$07
